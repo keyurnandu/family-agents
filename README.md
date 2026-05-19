@@ -149,7 +149,12 @@ family-agents/
 │       ├── researcher.md
 │       ├── qa.md
 │       └── devops.md
+├── projects/                 # Agent-created files land here (one folder per project)
+│   └── <project-name>/
+│       ├── index.html
+│       └── ...
 ├── utils/
+│   ├── action_executor.py    # Permission-prompted file/command execution
 │   ├── claude_client.py      # Subprocess wrapper for `claude --print`
 │   ├── db_manager.py         # SQLite conversation history
 │   ├── memory_manager.py     # Project memory read/write
@@ -159,7 +164,7 @@ family-agents/
 └── requirements.txt          # click, rich, pyyaml — no anthropic SDK
 ```
 
-> `db/` and `memory/dynamic/` are excluded from git — they contain your local project data and conversation history.
+> `db/`, `memory/dynamic/`, and `projects/*/` are excluded from git — they contain your local project data. The `projects/` folder itself is tracked so it exists on a fresh clone.
 
 ---
 
@@ -204,6 +209,28 @@ agent_personas:
 | `haiku` | Claude Haiku | Fast responses, lower cost |
 | `sonnet` | Claude Sonnet | Balanced — default |
 | `opus` | Claude Opus | Complex architecture, deep analysis |
+
+---
+
+## Where Project Files Go
+
+When an agent creates a file or runs a command, a permission prompt appears in your terminal before anything executes:
+
+```
+💻 Sam wants to write  src/app.py
+╭─ Create  src/app.py ─────────────────────╮
+│  1  def main():                           │
+│  2      print("Hello!")                   │
+╰──────────────────────────────────────────╯
+  Allow? [y/N]:
+```
+
+All approved files are written to:
+```
+family-agents/projects/<project-name>/
+```
+
+The `projects/` folder is created automatically when you start a session. Each project gets its own subfolder — source code is never touched.
 
 ---
 

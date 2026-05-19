@@ -14,7 +14,8 @@ env/
 # Project runtime data
 db/
 memory/dynamic/
-projects/
+projects/*
+!projects/.gitkeep
 
 # Environment
 .env

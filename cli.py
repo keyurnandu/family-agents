@@ -73,6 +73,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
             sys.exit(1)
 
     project_dir = BASE_DIR / "projects" / project
+    project_dir.mkdir(parents=True, exist_ok=True)   # always visible immediately
+
     existing = db.get_project(project)
     if existing:
         console.print(
