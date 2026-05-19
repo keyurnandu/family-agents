@@ -47,13 +47,13 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# Start a new project (prompts you for a name)
+# Start — shows project picker if you have saved projects, or asks for a name on first run
 python cli.py
 
-# Resume an existing project
+# Skip the picker and jump straight into a project
 python cli.py --project my-app
 
-# List all saved projects
+# List all saved projects (non-interactive)
 python cli.py --list
 
 # Use a faster/cheaper model
@@ -63,7 +63,22 @@ python cli.py --model haiku
 python cli.py --model opus
 ```
 
-Once running, just describe your project naturally:
+### Startup picker
+
+On first run you'll be asked for a project name. On every subsequent run a numbered list of your projects appears — type a number to resume or type a new name to create:
+
+```
+──────────────── Your Projects ────────────────
+  1  restaurant-saas    3 msgs · today
+  2  my-portfolio       12 msgs · Mon
+────────────────────────────────────────────────
+
+Resume [1-2], new name, or /help :
+```
+
+`/help`, `/list`, and `/quit` all work at this prompt too.
+
+Once inside a project, just describe your work naturally:
 
 ```
 You: I want to build a SaaS app for restaurant reservations
