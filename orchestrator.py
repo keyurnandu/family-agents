@@ -8,6 +8,7 @@ import yaml
 from rich.console import Console
 
 from agents.agent import Agent
+from utils.action_executor import parse_actions, prompt_and_execute
 from utils.claude_client import call_claude, call_claude_json
 from utils.db_manager import DBManager
 from utils.display import Display
@@ -300,6 +301,13 @@ class Orchestrator:
 
             agent_responses[role] = response
             self.display.show_agent_response(name, response, color, emoji)
+
+            # Permission-gated action execution
+            actions = parse_actions(response, name)
+            if actions:
+                outcomes = prompt_and_execute(actions, self.base_dir)
+                if outcomes:
+                    agent_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
             # Auto-extract REMEMBER: markers
             saved_count = self.memory.extract_and_save_memories(response, role)
