@@ -570,15 +570,46 @@ class Orchestrator:
     # Direct @mention: bypass routing, talk to one agent directly
     # ------------------------------------------------------------------
 
+    def _resolve_role(self, identifier: str) -> str | None:
+        """
+        Resolve an @mention identifier to an agent role key.
+        Accepts either the role key ("developer") or the persona name ("sam").
+        Returns None if no match found.
+        """
+        # Direct role key match
+        if identifier in self.agents:
+            return identifier
+        # Match by persona name (case-insensitive)
+        for role, persona in self.config["agent_personas"].items():
+            if persona.get("name", "").lower() == identifier.lower():
+                return role
+        return None
+
     def direct_message(self, role: str, message: str):
         """Send a message directly to one named agent, skipping Aria's routing."""
+        # Accept both role keys ("developer") and persona names ("sam")
+        resolved = self._resolve_role(role)
+        if not resolved:
+            names = ", ".join(
+                f"@{p.get('name','').lower()} ({r})"
+                for r, p in self.config["agent_personas"].items()
+                if r != "orchestrator"
+            )
+            console.print(
+                f"[red]Unknown agent:[/red] [bold]@{role}[/bold]\n"
+                f"[dim]Available: {names}[/dim]"
+            )
+            return
+        role = resolved
+
         agent = self.agents.get(role)
         if not agent:
-            console.print(f"[red]Unknown role: {role}[/red]")
+            console.print(f"[red]Agent not initialised: {role}[/red]")
             return
         if role not in self.active_roster:
+            p_name = self.config["agent_personas"].get(role, {}).get("name", role)
             console.print(
-                f"[yellow]{role} is not on the active team. "
+                f"[yellow]{p_name} ({role}) is not on the active team. "
                 f"Use /add {role} first.[/yellow]"
             )
             return
