@@ -38,46 +38,55 @@ class Action:
 
 
 def parse_actions(response_text: str, agent_name: str) -> list[Action]:
-    """Extract EXEC: tagged blocks from an agent response."""
+    """Extract EXEC: tagged blocks from an agent response.
+
+    Supports two formats:
+
+        EXEC:file:path/to/file.py        EXEC:bash
+        ```[lang]                         ```
+        <content>                         <commands>
+        ```                               ```
+    """
     actions: list[Action] = []
 
-    # Match EXEC:file:<path> or EXEC:bash blocks (with or without ``` fences)
-    pattern = re.compile(
-        r"EXEC:(file:([^\n]+)|bash)\s*\n"   # tag line
-        r"(?:```[a-z]*\n)?"                  # optional opening fence
-        r"(.*?)"                             # content (non-greedy)
-        r"(?:```\s*\n?|(?=EXEC:|$))",        # closing fence OR next block
-        re.DOTALL | re.IGNORECASE,
-    )
+    # Split on EXEC: boundaries so each chunk starts with a tag
+    chunks = re.split(r"(?=EXEC:(?:file:|bash))", response_text, flags=re.IGNORECASE)
 
-    for match in pattern.finditer(response_text):
-        full_tag = match.group(1)   # "file:src/app.py" or "bash"
-        file_path = match.group(2)  # only set for file actions
-        content = match.group(3).strip()
-
-        if not content:
+    for chunk in chunks:
+        chunk = chunk.strip()
+        if not chunk.upper().startswith("EXEC:"):
             continue
 
-        if file_path:
-            actions.append(
-                Action(
-                    kind="file",
-                    label=file_path.strip(),
-                    content=content,
-                    agent_name=agent_name,
-                )
-            )
-        else:
-            # Use first line as the label for display
-            label = content.splitlines()[0][:80]
-            actions.append(
-                Action(
-                    kind="bash",
-                    label=label,
-                    content=content,
-                    agent_name=agent_name,
-                )
-            )
+        # --- EXEC:file:<path> ---
+        file_match = re.match(
+            r"EXEC:file:([^\n]+)\n"       # tag + path
+            r"```[^\n]*\n"                # opening fence (``` or ```python etc.)
+            r"(.*?)"                      # content
+            r"```",                       # closing fence
+            chunk,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if file_match:
+            path = file_match.group(1).strip()
+            content = file_match.group(2).strip()
+            if content:
+                actions.append(Action(kind="file", label=path, content=content, agent_name=agent_name))
+            continue
+
+        # --- EXEC:bash ---
+        bash_match = re.match(
+            r"EXEC:bash\s*\n"             # tag
+            r"```[^\n]*\n"                # opening fence
+            r"(.*?)"                      # commands
+            r"```",                       # closing fence
+            chunk,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if bash_match:
+            content = bash_match.group(1).strip()
+            if content:
+                label = content.splitlines()[0][:80]
+                actions.append(Action(kind="bash", label=label, content=content, agent_name=agent_name))
 
     return actions
 
