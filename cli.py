@@ -208,6 +208,23 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 _handle_pre_project_command(user_input, saved, config, display)
                 continue
 
+            # @mention before a project is open
+            if re.match(r"^@\w+", user_input):
+                console.print(
+                    "[yellow]Open a project first before talking to an agent.[/yellow]  "
+                    "[dim]Type a number or project name to get started.[/dim]"
+                )
+                continue
+
+            # Reject anything that looks like a sentence (spaces + punctuation)
+            if len(user_input.split()) > 3 or any(c in user_input for c in "?!@#$%^&*()[]{}|<>"):
+                console.print(
+                    "[yellow]That doesn't look like a project name.[/yellow]  "
+                    "[dim]Type a number to resume an existing project, or a short name like "
+                    "[bold]my-app[/bold] to create a new one.[/dim]"
+                )
+                continue
+
             if "/" in user_input or "\\" in user_input:
                 console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
                 continue
