@@ -46,13 +46,17 @@ def _show_project_picker(projects: list) -> None:
     console.rule(style="dim")
 
 
-def _pick_project(db, display) -> str:
+def _pick_project(db, display, base_dir: Path) -> str:
     """
     Interactive project picker shown on startup when no --project flag was given.
 
     - No saved projects  →  ask for a name (first-run experience)
     - Saved projects exist →  show numbered list; accept number, new name, or /command
     """
+    import yaml
+    with open(base_dir / "config" / "settings.yaml", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
     while True:
         saved = db.list_projects()
 
@@ -79,6 +83,15 @@ def _pick_project(db, display) -> str:
             cmd = raw.lower()
             if cmd in ("/help", "/h"):
                 display.show_help()
+            elif cmd in ("/team", "/roster"):
+                default_roster = config["team"]["default_roster"]
+                available = config["team"]["available_agents"]
+                console.print("\n[dim]Showing default team — adjustments can be made once inside a project.[/dim]")
+                display.show_team(default_roster, config["agent_personas"])
+                console.print(
+                    f"[dim]Also available: {', '.join(available)}  "
+                    "(use /add <role> inside a project)[/dim]\n"
+                )
             elif cmd == "/list":
                 pass  # loop will re-draw the list on next iteration
             elif cmd in ("/quit", "/exit", "/q"):
@@ -86,7 +99,7 @@ def _pick_project(db, display) -> str:
                 sys.exit(0)
             else:
                 console.print(
-                    f"[yellow]{raw}[/yellow] is only available once you're inside a project.  "
+                    f"[yellow]{raw}[/yellow] is only available inside a project.  "
                     "[dim]Select or create one first, then use /help to see all commands.[/dim]"
                 )
             continue
@@ -149,7 +162,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
     display.show_welcome()
 
     if not project:
-        project = _pick_project(db, display)
+        project = _pick_project(db, display, BASE_DIR)
 
     project_dir = BASE_DIR / "projects" / project
     project_dir.mkdir(parents=True, exist_ok=True)   # always visible immediately
