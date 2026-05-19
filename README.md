@@ -78,7 +78,19 @@ Resume [1-2], new name, or /help :
 
 `/help`, `/list`, and `/quit` all work at this prompt too.
 
-Once inside a project, just describe your work naturally:
+Once inside a project, just describe your work naturally.
+
+### General chat (no project needed)
+
+Not everything needs a project. Just start typing a question or sentence and the team answers immediately — no project name required:
+
+```
+You: what's the difference between REST and GraphQL?
+You: how should I structure a Node.js monorepo?
+You: @sam what are your capabilities?
+```
+
+The conversation is saved as **💬 General chat** so nothing is ever lost. Use `/new <name>` or `/switch` to move into a real project whenever you're ready.
 
 ```
 You: I want to build a SaaS app for restaurant reservations

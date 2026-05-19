@@ -18,6 +18,17 @@ from rich.table import Table
 console = Console()
 BASE_DIR = Path(__file__).parent
 
+# Reserved name for the project-free general chat workspace
+GENERAL = "_general"
+
+# Words that signal the user is talking, not naming a project
+_CHAT_STARTERS = {
+    "what", "how", "why", "when", "where", "who", "which", "can", "could",
+    "should", "would", "will", "is", "are", "do", "does", "did", "has", "have",
+    "tell", "help", "explain", "show", "give", "build", "create", "make",
+    "write", "i", "we", "my", "our", "let", "please", "hi", "hello", "hey",
+}
+
 
 def _check_cli():
     if not shutil.which("claude"):
@@ -29,35 +40,73 @@ def _check_cli():
         sys.exit(1)
 
 
+def _is_chat_input(text: str) -> bool:
+    """Return True if the input looks like a chat message rather than a project name."""
+    # Questions
+    if text.endswith("?") or text.endswith("!"):
+        return True
+    words = text.split()
+    # More than two words → definitely a sentence
+    if len(words) > 2:
+        return True
+    # Starts with a common conversation word
+    if words and words[0].lower() in _CHAT_STARTERS:
+        return True
+    return False
+
+
 def _show_project_list(saved: list) -> None:
-    """Print the numbered project table."""
+    """Print the numbered project table, excluding the general chat workspace."""
+    real = [p for p in saved if p["name"] != GENERAL]
+    general = next((p for p in saved if p["name"] == GENERAL), None)
+
     table = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
     table.add_column("Num", style="bold cyan", no_wrap=True)
     table.add_column("Name", style="bold white", no_wrap=True)
     table.add_column("Info", style="dim")
-    for i, p in enumerate(saved, 1):
-        table.add_row(
-            str(i),
-            p["name"],
-            f"{p['message_count']} msgs · {p['last_active']}",
-        )
+    for i, p in enumerate(real, 1):
+        table.add_row(str(i), p["name"], f"{p['message_count']} msgs · {p['last_active']}")
+
     console.print()
     console.rule("[bold]Your Projects[/bold]", style="cyan")
-    console.print(table)
+    if real:
+        console.print(table)
+    if general:
+        console.print(
+            f"  [dim]💬 General chat  ·  {general['message_count']} msgs · {general['last_active']}  "
+            "(type [bold]/switch _general[/bold] to resume)[/dim]"
+        )
     console.rule(style="dim")
+    return real  # caller may need the filtered list
 
 
 def _show_startup_hint(saved: list) -> None:
-    """Print project list (if any) and a one-line usage hint."""
-    if saved:
+    """Print project list (if any) and usage hint including general chat."""
+    real = [p for p in saved if p["name"] != GENERAL]
+    general = next((p for p in saved if p["name"] == GENERAL), None)
+
+    if real:
         _show_project_list(saved)
         console.print(
-            "\n[dim]Type a [bold]number[/bold] to resume, a [bold]name[/bold] to start new, "
+            "\n[dim]Type a [bold]number[/bold] to resume a project, a [bold]name[/bold] to start new, "
+            "[bold]just start talking[/bold] for quick adhoc questions, "
+            "or [bold]/help[/bold] for commands.[/dim]\n"
+        )
+    elif general:
+        # Only general chat exists — no real projects yet
+        console.print(
+            f"\n[dim]💬 General chat  ·  {general['message_count']} msgs · {general['last_active']}  "
+            "(type [bold]/switch _general[/bold] to resume)[/dim]"
+        )
+        console.print(
+            "\n[dim]Type a [bold]name[/bold] to start a project, "
+            "[bold]just start talking[/bold] for adhoc questions, "
             "or [bold]/help[/bold] for commands.[/dim]\n"
         )
     else:
         console.print(
-            "\n[dim]No projects yet — type a [bold]name[/bold] to create your first one, "
+            "\n[dim]Type a [bold]name[/bold] to start a project, "
+            "[bold]just start talking[/bold] for adhoc questions, "
             "or [bold]/help[/bold] for commands.[/dim]\n"
         )
 
@@ -65,8 +114,7 @@ def _show_startup_hint(saved: list) -> None:
 def _open_project(name: str, db, display, model, force_new: bool = False):
     """
     Initialise a project by name and return a ready Orchestrator.
-    Prints resume/new status. Creates the project folder.
-    If force_new=True, treats it as a new project even if name exists in DB.
+    The _general workspace opens silently with no project-folder noise.
     """
     from orchestrator import Orchestrator
 
@@ -74,11 +122,16 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
     project_dir.mkdir(parents=True, exist_ok=True)
 
     existing = db.get_project(name)
-    if existing and not force_new:
+
+    if name == GENERAL:
+        # Silent open — no banner, no folder line
+        db.ensure_project(name)
+    elif existing and not force_new:
         console.print(
             f"\n[green]Resuming:[/green] [bold]{name}[/bold]  "
             f"[dim]({existing['message_count']} messages in history)[/dim]"
         )
+        console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
     else:
         if force_new and existing:
             console.print(
@@ -87,8 +140,7 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
         else:
             console.print(f"\n[green]Starting new project:[/green] [bold]{name}[/bold]")
         db.ensure_project(name)
-
-    console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
+        console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
 
     return Orchestrator(
         project_name=name,
@@ -101,19 +153,21 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
 
 def _pick_from_list(raw: str, saved: list) -> str | None:
     """
-    If raw is a valid number selecting from saved, return that project name.
-    Otherwise return None.
+    If raw is a valid number selecting from the real (non-general) saved projects,
+    return that project name. Otherwise return the raw string as a project name.
+    Returns None if the number is out of range (caller should re-prompt).
     """
+    real = [p for p in saved if p["name"] != GENERAL]
     if raw.isdigit():
         idx = int(raw) - 1
-        if 0 <= idx < len(saved):
-            return saved[idx]["name"]
+        if 0 <= idx < len(real):
+            return real[idx]["name"]
         console.print(
             f"[yellow]No project at position {raw}.[/yellow]  "
-            f"[dim]Choose 1–{len(saved)} or type a name.[/dim]"
+            f"[dim]Choose 1–{len(real)} or type a name.[/dim]"
         )
-        return None  # signal: bad number, re-prompt
-    return raw  # not a number — treat as project name
+        return None
+    return raw
 
 
 def _handle_pre_project_command(raw: str, saved: list, config: dict, display) -> None:
@@ -127,8 +181,9 @@ def _handle_pre_project_command(raw: str, saved: list, config: dict, display) ->
         available = config["team"]["available_agents"]
         console.print(f"[dim]Also available: {', '.join(available)}[/dim]\n")
     elif cmd == "/list":
-        if not saved:
-            console.print("\n[dim]No projects yet.[/dim]\n")
+        real = [p for p in saved if p["name"] != GENERAL]
+        if not real:
+            console.print("\n[dim]No projects yet. Just start talking for adhoc questions.[/dim]\n")
         else:
             _show_project_list(saved)
             console.print()
@@ -138,7 +193,7 @@ def _handle_pre_project_command(raw: str, saved: list, config: dict, display) ->
     else:
         console.print(
             f"[yellow]{raw}[/yellow] is only available inside a project.  "
-            "[dim]Select or create one first.[/dim]"
+            "[dim]Select or create one first, or just start talking for adhoc questions.[/dim]"
         )
 
 
@@ -168,7 +223,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
     # ── python cli.py --list ──────────────────────────────────────────
     if list_projects:
         saved = db.list_projects()
-        if not saved:
+        real = [p for p in saved if p["name"] != GENERAL]
+        if not real:
             console.print("\n[dim]No projects found. Start one with:[/dim]  python cli.py\n")
         else:
             _show_project_list(saved)
@@ -178,14 +234,16 @@ def main(project: str | None, list_projects: bool, model: str | None):
     display.show_welcome()
 
     orchestrator = None
+    current_project = project  # None until resolved
 
     # ── python cli.py --project <name>: skip straight in ─────────────
-    if project:
-        orchestrator = _open_project(project, db, display, model)
-        console.print(
-            "[dim]Describe your project or ask the team anything. "
-            "Type [bold]/help[/bold] for commands.[/dim]\n"
-        )
+    if current_project:
+        orchestrator = _open_project(current_project, db, display, model)
+        if current_project != GENERAL:
+            console.print(
+                "[dim]Describe your project or ask the team anything. "
+                "Type [bold]/help[/bold] for commands.[/dim]\n"
+            )
     else:
         _show_startup_hint(db.list_projects())
 
@@ -200,47 +258,52 @@ def main(project: str | None, list_projects: bool, model: str | None):
         if not user_input:
             continue
 
-        # ── No project open yet: resolve from this input ──────────────
+        # ── No project open yet ───────────────────────────────────────
         if orchestrator is None:
             saved = db.list_projects()
 
+            # Slash commands
             if user_input.startswith("/"):
                 _handle_pre_project_command(user_input, saved, config, display)
                 continue
 
-            # @mention before a project is open
+            # @mention → route through general chat
             if re.match(r"^@\w+", user_input):
                 console.print(
-                    "[yellow]Open a project first before talking to an agent.[/yellow]  "
-                    "[dim]Type a number or project name to get started.[/dim]"
+                    "[dim]💬 Routing to general chat (no project open)…[/dim]"
                 )
-                continue
+                current_project = GENERAL
+                orchestrator = _open_project(GENERAL, db, display, model)
+                # fall through to @mention handler below
 
-            # Reject anything that looks like a sentence (spaces + punctuation)
-            if len(user_input.split()) > 3 or any(c in user_input for c in "?!@#$%^&*()[]{}|<>"):
+            # Chat input → auto-open general workspace
+            elif _is_chat_input(user_input):
                 console.print(
-                    "[yellow]That doesn't look like a project name.[/yellow]  "
-                    "[dim]Type a number to resume an existing project, or a short name like "
-                    "[bold]my-app[/bold] to create a new one.[/dim]"
+                    "[dim]💬 General chat — use [bold]/new <name>[/bold] or "
+                    "[bold]/switch[/bold] to open a project anytime.[/dim]"
                 )
+                current_project = GENERAL
+                orchestrator = _open_project(GENERAL, db, display, model)
+                # fall through to regular message handler below
+
+            else:
+                # Looks like a project name
+                if "/" in user_input or "\\" in user_input:
+                    console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
+                    continue
+
+                name = _pick_from_list(user_input, saved)
+                if name is None:
+                    continue  # bad number — error already printed
+
+                current_project = name
+                orchestrator = _open_project(current_project, db, display, model)
                 continue
 
-            if "/" in user_input or "\\" in user_input:
-                console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
-                continue
-
-            name = _pick_from_list(user_input, saved)
-            if name is None:
-                continue  # bad number — already printed error
-
-            project = name
-            orchestrator = _open_project(project, db, display, model)
-            continue
-
-        # ── Inside a project: slash commands ─────────────────────────
+        # ── Inside a project or general chat: slash commands ──────────
         if user_input.startswith("/"):
             cmd = user_input.lower()
-            parts = cmd.split(None, 1)  # ["/switch", "name"] or ["/switch"]
+            parts = cmd.split(None, 1)
 
             if cmd in ("/quit", "/exit", "/q"):
                 console.print("[dim]Session saved. Goodbye![/dim]")
@@ -275,39 +338,42 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 saved = db.list_projects()
 
                 if len(parts) > 1:
-                    # Direct: /switch my-app  or  /switch 2
                     arg = parts[1].strip()
-                    name = _pick_from_list(arg, saved)
-                    if name is None:
-                        continue
-                else:
-                    # No arg — show list and prompt inline
-                    if saved:
-                        _show_project_list(saved)
-                        console.print(
-                            "\n[dim]Type a number or project name (or press Enter to stay here):[/dim]"
-                        )
+                    # Allow /switch _general directly
+                    if arg == GENERAL:
+                        name = GENERAL
                     else:
-                        console.print("[dim]No other projects yet. Type a name to create one:[/dim]")
+                        name = _pick_from_list(arg, saved)
+                        if name is None:
+                            continue
+                else:
+                    _show_startup_hint(saved)
                     try:
                         arg = Prompt.ask("[bold cyan]Switch to[/bold cyan]").strip()
                     except (KeyboardInterrupt, EOFError):
-                        console.print("\n[dim]Staying in current project.[/dim]")
+                        console.print("\n[dim]Staying in current workspace.[/dim]")
                         continue
                     if not arg:
-                        console.print("[dim]Staying in current project.[/dim]")
+                        console.print("[dim]Staying in current workspace.[/dim]")
                         continue
-                    name = _pick_from_list(arg, saved)
+                    name = _pick_from_list(arg, saved) if arg != GENERAL else GENERAL
                     if name is None:
                         continue
 
-                if name == project:
-                    console.print(f"[dim]Already in [bold]{project}[/bold].[/dim]")
+                if name == current_project:
+                    label = "💬 general chat" if name == GENERAL else f"[bold]{current_project}[/bold]"
+                    console.print(f"[dim]Already in {label}.[/dim]")
                     continue
 
-                console.print(f"\n[dim]Leaving [bold]{project}[/bold] — session saved.[/dim]")
-                project = name
-                orchestrator = _open_project(project, db, display, model)
+                label = "💬 general chat" if current_project == GENERAL else f"[bold]{current_project}[/bold]"
+                console.print(f"\n[dim]Leaving {label} — session saved.[/dim]")
+                current_project = name
+                orchestrator = _open_project(current_project, db, display, model)
+                if current_project != GENERAL:
+                    console.print(
+                        "[dim]Describe your project or ask the team anything. "
+                        "Type [bold]/help[/bold] for commands.[/dim]\n"
+                    )
 
             # ── /new <name> ───────────────────────────────────────────
             elif parts[0] == "/new":
@@ -321,9 +387,10 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 if "/" in name or "\\" in name:
                     console.print("[yellow]Project name can't contain slashes.[/yellow]")
                     continue
-                console.print(f"\n[dim]Leaving [bold]{project}[/bold] — session saved.[/dim]")
-                project = name
-                orchestrator = _open_project(project, db, display, model, force_new=True)
+                label = "💬 general chat" if current_project == GENERAL else f"[bold]{current_project}[/bold]"
+                console.print(f"\n[dim]Leaving {label} — session saved.[/dim]")
+                current_project = name
+                orchestrator = _open_project(current_project, db, display, model, force_new=True)
 
             else:
                 console.print(
