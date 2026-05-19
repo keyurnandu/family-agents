@@ -107,6 +107,65 @@ class Display:
                     console.print(f"    [dim]{preview}…[/dim]")
             console.print()
 
+    def show_status(self, project_name: str, info: dict | None, active_roster: list,
+                    model: str, real_files: list, doc_files: list,
+                    memory_entries: list, category_counts: dict,
+                    total_skills: int, session_stats: dict):
+        from rich.panel import Panel
+        from pathlib import Path
+
+        est_tokens = session_stats.get("estimated_tokens", 0)
+        calls = session_stats.get("calls", 0)
+        msg_count = info.get("message_count", 0) if info else 0
+        last_active = info.get("last_active", "—") if info else "—"
+
+        # Token bar
+        token_pct = min(est_tokens / 80000, 1.0)
+        bar_len = 20
+        filled = int(bar_len * token_pct)
+        bar_color = "green" if token_pct < 0.5 else "yellow" if token_pct < 0.8 else "red"
+        bar = f"[{bar_color}]{'█' * filled}[/{bar_color}][dim]{'░' * (bar_len - filled)}[/dim]"
+
+        # File list (cap at 8)
+        if real_files:
+            shown = real_files[:8]
+            file_lines = "  ".join(f"[dim]{Path(f).name}[/dim]" for f in shown)
+            if len(real_files) > 8:
+                file_lines += f"  [dim]+{len(real_files)-8} more[/dim]"
+        else:
+            file_lines = "[dim]none yet[/dim]"
+
+        # Memory summary
+        mem_parts = [f"[cyan]{cat}[/cyan] {n}" for cat, n in category_counts.items()]
+        mem_line = "  ".join(mem_parts) if mem_parts else "[dim]none yet[/dim]"
+
+        lines = [
+            f"[bold]Project:[/bold]  {project_name}",
+            f"[bold]Messages:[/bold] {msg_count}  ·  Last active: [dim]{last_active}[/dim]",
+            f"[bold]Team:[/bold]     {' · '.join(active_roster)}  [dim](model: {model})[/dim]",
+            f"[bold]Skills:[/bold]   {total_skills} total across team",
+            "",
+            f"[bold]Memory[/bold] ({len(memory_entries)} items)",
+            f"  {mem_line}",
+            "",
+            f"[bold]Files[/bold] ({len(real_files)} created · {len(doc_files)} docs)",
+            f"  {file_lines}",
+            "",
+            f"[bold]Session[/bold]  {calls} calls · ~{est_tokens:,} tokens estimated",
+            f"  {bar}  {int(token_pct*100)}% of safe context",
+        ]
+        if token_pct > 0.75:
+            lines.append("\n  [yellow]⚠ Context getting large — consider /clear[/yellow]")
+
+        console.print()
+        console.print(Panel(
+            "\n".join(lines),
+            title=f"[bold]Status — {project_name}[/bold]",
+            border_style="cyan",
+            padding=(1, 2),
+        ))
+        console.print()
+
     def show_memory(self, entries: list, project_name: str):
         if not entries:
             console.print(
@@ -177,6 +236,8 @@ class Display:
             "  [cyan]/skill list [role][/cyan]   List skills for a role (or all roles)\n"
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"
+            "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
+            "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
             "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"
             "  [cyan]/new <name>[/cyan]        Create and switch to a brand new project\n"

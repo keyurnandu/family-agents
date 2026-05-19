@@ -133,6 +133,8 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/memory` | View everything saved to project memory |
 | `/history` | Show recent conversation turns |
 | `/project` | Show project stats (messages, memory items, model) |
+| `/status` | Project snapshot — memory, files, token usage, docs |
+| `/export <type>` | Generate a doc (requirements, architecture, sprint-plan…) |
 | `/switch [name\|number]` | Switch to another project — shows picker if no arg |
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
@@ -141,6 +143,58 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/quit` | Exit |
 
 **Available roles:** `pm` · `bsa` · `developer` · `lead` · `researcher` · `qa` · `devops`
+
+---
+
+## Export & Reports
+
+After a project conversation, generate clean documents directly from what's been discussed and decided. Saved to `projects/<name>/docs/`.
+
+**Natural language:**
+```
+You: generate a requirements doc
+You: export the architecture decisions
+You: create a sprint plan from what we've discussed
+You: write a technical spec
+```
+
+**Command:**
+```
+/export requirements
+/export architecture
+/export technical-spec
+/export sprint-plan
+/export api-docs
+/export test-plan
+/export deployment-plan
+```
+
+Each document is written by the most relevant agent (BSA for requirements, Lead for architecture, PM for sprint plans, etc.), saved as `docs/<type>-<date>.md`, and a preview is shown in the terminal.
+
+---
+
+## Project Status
+
+`/status` gives a live snapshot of where a project stands:
+
+```
+╭─ Status: restaurant-saas ──────────────────────────╮
+│  Messages:  47  ·  Last active: today               │
+│  Team:      pm · bsa · developer · lead             │
+│  Skills:    3 total across team                     │
+│                                                     │
+│  Memory (12 items)                                  │
+│    decision 5   requirement 4   technical 3         │
+│                                                     │
+│  Files (8 created · 2 docs)                         │
+│    index.js  app.js  package.json  …                │
+│                                                     │
+│  Session  14 calls · ~8,400 tokens estimated        │
+│  ████████████░░░░░░░  60% of safe context           │
+╰─────────────────────────────────────────────────────╯
+```
+
+The token bar turns yellow at 50% and red at 80% — a signal to consider `/clear` before the context window fills up.
 
 ---
 

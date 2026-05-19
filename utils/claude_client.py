@@ -8,6 +8,19 @@ import shutil
 import subprocess
 from typing import Optional
 
+# In-process session stats (reset on process start, not persisted)
+_session_stats: dict = {"calls": 0, "input_chars": 0, "output_chars": 0}
+
+def get_session_stats() -> dict:
+    total_chars = _session_stats["input_chars"] + _session_stats["output_chars"]
+    return {
+        **_session_stats,
+        "estimated_tokens": total_chars // 4,
+    }
+
+def reset_session_stats() -> None:
+    _session_stats.update(calls=0, input_chars=0, output_chars=0)
+
 
 def _check_cli():
     if not shutil.which("claude"):
@@ -34,6 +47,8 @@ def call_claude(
 
     cmd.append(prompt)
 
+    _session_stats["input_chars"] += len(prompt) + len(system_prompt or "")
+
     result = subprocess.run(
         cmd,
         stdin=subprocess.DEVNULL,   # never consume terminal stdin
@@ -48,7 +63,10 @@ def call_claude(
         stderr = result.stderr.strip()
         raise RuntimeError(f"claude CLI exit {result.returncode}: {stderr}")
 
-    return result.stdout.strip()
+    output = result.stdout.strip()
+    _session_stats["output_chars"] += len(output)
+    _session_stats["calls"] += 1
+    return output
 
 
 def call_claude_json(

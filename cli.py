@@ -190,6 +190,8 @@ def _handle_pre_project_command(raw: str, saved: list, config: dict, display) ->
     elif cmd in ("/quit", "/exit", "/q"):
         console.print("[dim]Goodbye![/dim]")
         sys.exit(0)
+    elif cmd == "/status":
+        console.print("[dim]Open a project first to see its status.[/dim]")
     else:
         console.print(
             f"[yellow]{raw}[/yellow] is only available inside a project.  "
@@ -332,6 +334,19 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
             elif cmd == "/clear":
                 orchestrator.clear_context()
+
+            elif cmd == "/status":
+                orchestrator.show_status()
+
+            elif parts[0] == "/export":
+                doc_type = parts[1].strip() if len(parts) > 1 else ""
+                if not doc_type:
+                    console.print(
+                        "[dim]Usage: /export <type>\n"
+                        "Types: requirements · architecture · technical-spec · sprint-plan · api-docs · test-plan · deployment-plan[/dim]"
+                    )
+                else:
+                    orchestrator.export_doc(doc_type)
 
             elif parts[0] == "/skill":
                 sub = (parts[1] if len(parts) > 1 else "").split(None, 2)

@@ -27,6 +27,34 @@ ROLE_DESCRIPTIONS = {
     "devops": "CI/CD pipelines, cloud infrastructure, deployments, monitoring",
 }
 
+# Maps export type keywords to the agent best suited to write that doc
+EXPORT_TYPE_MAP = {
+    "requirements":   ("bsa",       "requirements-doc"),
+    "requirement":    ("bsa",       "requirements-doc"),
+    "user-stories":   ("bsa",       "user-stories"),
+    "architecture":   ("lead",      "architecture-doc"),
+    "technical":      ("lead",      "technical-spec"),
+    "tech-spec":      ("lead",      "technical-spec"),
+    "technical-spec": ("lead",      "technical-spec"),
+    "sprint":         ("pm",        "sprint-plan"),
+    "sprint-plan":    ("pm",        "sprint-plan"),
+    "roadmap":        ("pm",        "roadmap"),
+    "plan":           ("pm",        "project-plan"),
+    "api":            ("developer", "api-docs"),
+    "api-docs":       ("developer", "api-docs"),
+    "test":           ("qa",        "test-plan"),
+    "test-plan":      ("qa",        "test-plan"),
+    "deployment":     ("devops",    "deployment-plan"),
+    "deploy":         ("devops",    "deployment-plan"),
+}
+
+# Patterns that signal export/report generation intent
+_EXPORT_PATTERNS = [
+    r"(?:generate|create|write|produce|export|make)\s+(?:a\s+|an\s+|the\s+)?(\w[\w\s\-]*?)\s+(?:doc(?:ument)?|spec|plan|report|summary)",
+    r"export\s+(?:the\s+)?(\w[\w\s\-]*?)(?:\s+decisions?|\s+notes?)?$",
+    r"(?:generate|create|write)\s+(?:a\s+)?(\w[\w\s\-]*?)$",
+]
+
 # JSON schema the orchestrator uses to decide routing.
 # Work is organised into sequential PHASES. Within each phase all agents
 # run in parallel. Each phase's combined output is passed as context to
@@ -373,6 +401,16 @@ class Orchestrator:
     def process(self, user_input: str):
         self.db.save_message(self.project_name, "user", user_input)
         self.messages.append({"role": "user", "content": user_input})
+
+        # Detect export/report generation intent (before teaching detection — more specific)
+        export_match = self._detect_export_intent(user_input)
+        if export_match:
+            agent_role, doc_type = export_match
+            self.export_doc(doc_type, agent_role)
+            self.db.save_message(self.project_name, "assistant", f"[Generated {doc_type}]")
+            self.messages.append({"role": "assistant", "content": f"[Generated {doc_type}]"})
+            console.print()
+            return
 
         # Capture explicit memory instructions from the customer
         for pat in [
@@ -734,6 +772,151 @@ class Orchestrator:
                 role_filter = resolved
         skills = self.memory.list_skills(role_filter)
         self.display.show_skills(skills, self.config["agent_personas"])
+
+    def show_status(self):
+        from utils.claude_client import get_session_stats
+        info = self.db.get_project(self.project_name)
+        project_dir = self.base_dir / "projects" / self.project_name
+        # Collect real files (not .gitkeep)
+        all_files = sorted(project_dir.rglob("*")) if project_dir.exists() else []
+        real_files = [f for f in all_files if f.is_file() and f.name != ".gitkeep"]
+        # Count docs
+        docs_dir = project_dir / "docs"
+        doc_files = list(docs_dir.glob("*.md")) if docs_dir.exists() else []
+        # Memory entries by category
+        entries = self.memory.list_memory_entries()
+        category_counts: dict[str, int] = {}
+        for e in entries:
+            cat = e.get("category", "note")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        # Skills
+        skill_counts = {role: self.memory.skill_count(role) for role in self.active_roster}
+        total_skills = sum(skill_counts.values())
+        # Session stats
+        stats = get_session_stats()
+        self.display.show_status(
+            project_name=self.project_name,
+            info=info,
+            active_roster=self.active_roster,
+            model=self.model,
+            real_files=real_files,
+            doc_files=doc_files,
+            memory_entries=entries,
+            category_counts=category_counts,
+            total_skills=total_skills,
+            session_stats=stats,
+        )
+
+    def _detect_export_intent(self, user_input: str) -> tuple[str, str] | None:
+        """
+        Detect export/report generation intent.
+        Returns (agent_role, doc_type) or None.
+        """
+        text = user_input.lower().strip()
+        for pattern in _EXPORT_PATTERNS:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if m:
+                keyword = m.group(1).strip().lower().replace(" ", "-")
+                # Try exact match first, then prefix match
+                if keyword in EXPORT_TYPE_MAP:
+                    return EXPORT_TYPE_MAP[keyword]
+                for key, val in EXPORT_TYPE_MAP.items():
+                    if keyword.startswith(key) or key.startswith(keyword):
+                        return val
+                # Unknown doc type — default to pm for general summary
+                return ("pm", keyword.replace(" ", "-"))
+        return None
+
+    def export_doc(self, doc_type: str, agent_role: str | None = None):
+        """
+        Generate and save a document to projects/<name>/docs/.
+        agent_role overrides the default mapping if provided.
+        """
+        from datetime import datetime
+
+        personas = self.config["agent_personas"]
+
+        # Resolve agent
+        if agent_role:
+            role = self._resolve_role(agent_role) or "pm"
+        else:
+            role, doc_type = EXPORT_TYPE_MAP.get(doc_type.lower(), ("pm", doc_type))
+
+        # Ensure the role is available (fall back to any active agent)
+        if role not in self.active_roster:
+            role = self.active_roster[0]
+
+        p = personas.get(role, {})
+        agent_name = p.get("name", role.upper())
+
+        # Build rich context
+        memory_text = self.memory.load_project_memory() or "No project memory yet."
+        history_text = self._format_history()
+        project_dir = self.base_dir / "projects" / self.project_name
+        file_list = []
+        if project_dir.exists():
+            file_list = [
+                str(f.relative_to(project_dir))
+                for f in sorted(project_dir.rglob("*"))
+                if f.is_file() and f.name != ".gitkeep"
+            ]
+
+        export_prompt = (
+            f"Project: {self.project_name}\n"
+            f"Document to produce: {doc_type}\n\n"
+            f"## Project Memory\n{memory_text}\n\n"
+            f"## Recent Conversation\n{history_text or 'No history.'}\n\n"
+            f"## Files Created So Far\n" + ("\n".join(file_list) if file_list else "None yet.") + "\n\n"
+            f"Write a complete, well-structured {doc_type} in Markdown format. "
+            f"Base it entirely on what has been discussed and decided. "
+            f"Use proper headings, tables where appropriate, and be thorough. "
+            f"Do NOT use EXEC: blocks — output only the document content."
+        )
+
+        console.print(
+            f"\n[bold bright_cyan]📄 Generating {doc_type}…[/bold bright_cyan]"
+            f"  [dim]{p.get('emoji','')} {agent_name} is writing[/dim]\n"
+        )
+
+        agent = self.agents.get(role)
+        if not agent:
+            console.print(f"[red]Agent {role} not available.[/red]")
+            return
+
+        try:
+            with console.status(
+                f"[{p.get('color','white')}]{p.get('emoji','')} {agent_name} writing {doc_type}…[/{p.get('color','white')}]",
+                spinner="dots"
+            ):
+                content = agent.respond(
+                    task=export_prompt,
+                    context=f"Generating {doc_type} for project: {self.project_name}",
+                    history_text="",
+                )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]⚡ Export interrupted.[/yellow]")
+            return
+
+        # Save to docs/
+        docs_dir = project_dir / "docs"
+        docs_dir.mkdir(parents=True, exist_ok=True)
+        date_str = datetime.now().strftime("%Y-%m-%d")
+        filename = f"{doc_type}-{date_str}.md"
+        out_path = docs_dir / filename
+        out_path.write_text(content, encoding="utf-8")
+
+        # Display preview
+        self.display.show_agent_response(agent_name, content[:800] + ("\n\n[dim]…[/dim]" if len(content) > 800 else ""), p.get("color", "white"), p.get("emoji", ""))
+        console.print(
+            f"\n[green]✓ Saved:[/green] [cyan]projects/{self.project_name}/docs/{filename}[/cyan]\n"
+        )
+
+        # Save to memory
+        self.memory.save_project_memory(
+            content=f"Generated {doc_type} → docs/{filename}",
+            category="decision",
+            source=role,
+        )
 
     def add_agent(self, role: str):
         p = self.config["agent_personas"]
