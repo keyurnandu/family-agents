@@ -128,6 +128,11 @@ class Display:
 
     def show_help(self):
         panel = Panel(
+            "[bold]Talk to the team[/bold]\n"
+            "  Just type naturally — Aria routes to the right agents automatically\n"
+            "  [cyan]@sam build the login page[/cyan]    — talk directly to one agent\n"
+            "  [cyan]@jordan review the API design[/cyan]\n"
+            "  Press [bold]Ctrl+C[/bold] at any time to interrupt a running agent\n\n"
             "[bold]Commands[/bold]\n"
             "  [cyan]/team[/cyan]              Show current team roster\n"
             "  [cyan]/add <role>[/cyan]        Add agent  (e.g. [dim]/add qa[/dim])\n"

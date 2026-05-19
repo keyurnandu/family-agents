@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 
@@ -275,38 +276,59 @@ class Orchestrator:
                     mem.get("category", "note"), mem.get("content", "")
                 )
 
-        # Call each agent
+        # Call agents — in parallel when there are multiple
         agent_responses: dict[str, str] = {}
         history_text = self._format_history()
         agents_to_call = [r for r in routing.get("agents", []) if r in self.active_roster]
 
-        for role in agents_to_call:
+        def _call_one(role: str) -> tuple[str, str]:
+            """Run one agent and return (role, response). Thread-safe."""
             agent = self.agents.get(role)
             if not agent:
-                continue
+                return role, "(agent not found)"
+            task = routing.get("tasks", {}).get(role, user_input)
+            return role, agent.respond(
+                task=task,
+                context=f"Customer said: {user_input}",
+                history_text=history_text,
+            )
+
+        if agents_to_call:
+            # Build a live status line listing every agent that is currently working
+            working = {r: personas.get(r, {}) for r in agents_to_call}
+            status_parts = [
+                f"[{p.get('color','white')}]{p.get('emoji','')} {p.get('name', r)}[/{p.get('color','white')}]"
+                for r, p in working.items()
+            ]
+            status_msg = "  ".join(status_parts) + "  [dim]working in parallel…[/dim]"
+
+            try:
+                with console.status(status_msg, spinner="dots"):
+                    with ThreadPoolExecutor(max_workers=len(agents_to_call)) as pool:
+                        futures = {pool.submit(_call_one, r): r for r in agents_to_call}
+                        for future in as_completed(futures):
+                            role, response = future.result()
+                            agent_responses[role] = response
+            except KeyboardInterrupt:
+                console.print("\n[yellow]⚡ Interrupted — returning to prompt.[/yellow]")
+                console.print()
+                return
+
+        # Display results and handle actions (sequentially — needs user interaction)
+        project_dir = self.base_dir / "projects" / self.project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        for role, response in agent_responses.items():
             p = personas.get(role, {})
             name = p.get("name", role.upper())
             color = p.get("color", "white")
             emoji = p.get("emoji", "")
-            task = routing.get("tasks", {}).get(role, user_input)
 
-            with console.status(
-                f"[{color}]{emoji} {name} is working…[/{color}]", spinner="dots"
-            ):
-                response = agent.respond(
-                    task=task,
-                    context=f"Customer said: {user_input}",
-                    history_text=history_text,
-                )
-
-            agent_responses[role] = response
             self.display.show_agent_response(name, response, color, emoji)
 
             # Permission-gated action execution
             actions = parse_actions(response, name)
             if actions:
-                project_dir = self.base_dir / "projects" / self.project_name
-                project_dir.mkdir(parents=True, exist_ok=True)
                 outcomes = prompt_and_execute(actions, project_dir)
                 if outcomes:
                     agent_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
@@ -360,6 +382,61 @@ class Orchestrator:
         else:
             console.print("[dim yellow]No response generated. Try rephrasing your message.[/dim yellow]")
 
+        console.print()
+
+    # ------------------------------------------------------------------
+    # Direct @mention: bypass routing, talk to one agent directly
+    # ------------------------------------------------------------------
+
+    def direct_message(self, role: str, message: str):
+        """Send a message directly to one named agent, skipping Aria's routing."""
+        agent = self.agents.get(role)
+        if not agent:
+            console.print(f"[red]Unknown role: {role}[/red]")
+            return
+        if role not in self.active_roster:
+            console.print(
+                f"[yellow]{role} is not on the active team. "
+                f"Use /add {role} first.[/yellow]"
+            )
+            return
+
+        p = self.config["agent_personas"].get(role, {})
+        name = p.get("name", role.upper())
+        color = p.get("color", "white")
+        emoji = p.get("emoji", "")
+
+        self.db.save_message(self.project_name, "user", f"@{role}: {message}")
+        self.messages.append({"role": "user", "content": f"@{role}: {message}"})
+
+        console.print()
+        try:
+            with console.status(
+                f"[{color}]{emoji} {name} is working…[/{color}]", spinner="dots"
+            ):
+                response = agent.respond(
+                    task=message,
+                    context=f"The customer is speaking directly to you.",
+                    history_text=self._format_history(),
+                )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]⚡ Interrupted.[/yellow]")
+            console.print()
+            return
+
+        self.display.show_agent_response(name, response, color, emoji)
+
+        project_dir = self.base_dir / "projects" / self.project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
+        actions = parse_actions(response, name)
+        if actions:
+            outcomes = prompt_and_execute(actions, project_dir)
+            if outcomes:
+                response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+
+        self.memory.extract_and_save_memories(response, role)
+        self.db.save_message(self.project_name, "assistant", response)
+        self.messages.append({"role": "assistant", "content": response})
         console.print()
 
     # ------------------------------------------------------------------

@@ -4,6 +4,7 @@ Tech Organization Agent System
 Run: python cli.py [--project NAME]
 """
 
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -151,6 +152,16 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     f"[yellow]Unknown command:[/yellow] {user_input}  "
                     "[dim](type /help for commands)[/dim]"
                 )
+            continue
+
+        # @mention — talk directly to one agent, bypassing Aria's routing
+        # e.g.  @sam can you add unit tests?
+        #        @jordan what architecture do you recommend?
+        mention = re.match(r"^@(\w+)\s+(.*)", user_input, re.DOTALL)
+        if mention:
+            role = mention.group(1).lower()
+            message = mention.group(2).strip()
+            orchestrator.direct_message(role, message)
             continue
 
         # Regular message → route through orchestrator

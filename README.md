@@ -73,6 +73,27 @@ Aria routes your message to the right team members, they collaborate, and you ge
 
 ---
 
+## Talking to the Team
+
+**Normal message** — Aria routes automatically to the right agents, who work in parallel:
+```
+You: build a login page with HTML, CSS, and JS
+→ Sam (Developer) and Jordan (Lead) work simultaneously
+→ Aria synthesizes their responses
+```
+
+**@mention** — talk directly to one specific agent, skipping routing:
+```
+@sam add unit tests for the calculator
+@jordan what architecture would you recommend?
+@morgan write user stories for the checkout flow
+@riley compare Redis vs Memcached for our use case
+```
+
+**Ctrl+C** — interrupt any running agent and return to the prompt immediately.
+
+---
+
 ## In-Session Commands
 
 | Command | Description |
