@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import anthropic
+from utils.claude_client import call_claude
 
 if TYPE_CHECKING:
     from utils.memory_manager import MemoryManager
@@ -21,7 +21,6 @@ class Agent:
         base_dir: Path,
         memory: "MemoryManager",
         model: str,
-        client: anthropic.Anthropic,
         orchestrator=None,
     ):
         self.role = role
@@ -29,8 +28,7 @@ class Agent:
         self.base_dir = base_dir
         self.memory = memory
         self.model = model
-        self.client = client
-        self.orchestrator = orchestrator  # back-reference for peer consultation
+        self.orchestrator = orchestrator
 
         self.name = persona.get("name", role.upper())
         self.color = persona.get("color", "white")
@@ -43,7 +41,7 @@ class Agent:
         project_section = (
             f"## Project Memory\n{project_memory}"
             if project_memory
-            else "## Project Memory\nNo project memory recorded yet."
+            else "## Project Memory\nNone yet."
         )
 
         return (
@@ -51,144 +49,75 @@ class Agent:
             f"{role_memory}\n\n"
             f"{project_section}\n\n"
             "## Working Instructions\n"
-            "- Stay in your role — answer from your domain's perspective\n"
-            "- Be specific and actionable; avoid vague generalities\n"
-            "- Ask clarifying questions if requirements are ambiguous\n"
-            "- Use `consult_colleague` when you genuinely need a peer's expertise\n"
-            "- If you identify something that must be remembered across sessions, "
-            "prefix it with REMEMBER: on its own line\n"
+            "- Stay in your domain — answer from your role's perspective\n"
+            "- Be specific and actionable; skip vague generalities\n"
+            "- Ask clarifying questions when requirements are ambiguous\n"
+            "- If you learn something that must persist across sessions, prefix it with REMEMBER:\n"
+            "- If you need a colleague's input, prefix the question with ASK_COLLEAGUE:<role>: <question>\n"
         )
 
-    def _peer_tools(self) -> list:
-        colleagues = [r for r in ALL_ROLES if r != self.role]
-        return [
-            {
-                "name": "consult_colleague",
-                "description": (
-                    "Ask a specific colleague for their expert input on a question "
-                    "that falls outside your own domain."
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "colleague_role": {
-                            "type": "string",
-                            "enum": colleagues,
-                            "description": "The role of the colleague to consult",
-                        },
-                        "question": {
-                            "type": "string",
-                            "description": "The specific question for your colleague",
-                        },
-                    },
-                    "required": ["colleague_role", "question"],
-                },
-            }
-        ]
-
-    # ------------------------------------------------------------------
-    # Internal: simple response (no peer consultation, used for peer calls)
-    # ------------------------------------------------------------------
-    def _respond_simple(self, task: str, context: str) -> str:
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=1024,
-            system=self._build_system_prompt(),
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Context from a colleague:\n{context}\n\nQuestion: {task}",
-                }
-            ],
-        )
-        return response.content[0].text if response.content else "(no response)"
-
-    # ------------------------------------------------------------------
-    # Internal: handle a peer consultation request
-    # ------------------------------------------------------------------
-    def _consult_peer(self, colleague_role: str, question: str) -> str:
+    def _get_peer_input(self, colleague_role: str, question: str) -> str:
+        """Ask a peer agent a single question (no further nesting)."""
         if not self.orchestrator:
-            return f"Peer consultation unavailable (no orchestrator reference)."
+            return "(peer consultation unavailable)"
 
         active = getattr(self.orchestrator, "active_roster", [])
         if colleague_role not in active:
-            return (
-                f"{colleague_role} is not currently on the team. "
-                "I'll proceed with the information I have."
-            )
+            return f"({colleague_role} is not on the active team)"
 
         peer: Agent | None = self.orchestrator.agents.get(colleague_role)
         if not peer:
-            return f"Could not locate {colleague_role} agent."
+            return f"(agent {colleague_role} not found)"
 
-        return peer._respond_simple(
-            task=question,
-            context=f"Asked by {self.name} ({self.role})",
+        peer_system = peer._build_system_prompt()
+        prompt = (
+            f"Your colleague {self.name} ({self.role}) asks:\n\n"
+            f"{question}\n\n"
+            "Give a concise, expert answer from your role's perspective."
         )
+        try:
+            return call_claude(prompt=prompt, system_prompt=peer_system, model=self.model)
+        except Exception as e:
+            return f"(peer consultation failed: {e})"
 
-    # ------------------------------------------------------------------
-    # Public: full response with optional peer consultation
-    # ------------------------------------------------------------------
-    def respond(self, task: str, context: str, conversation_history: list) -> str:
+    def respond(self, task: str, context: str, history_text: str) -> str:
+        """Generate a response, handling one round of peer consultation if needed."""
         system_prompt = self._build_system_prompt()
-        tools = self._peer_tools()
 
-        # Use the last few turns for context; filter to simple string content only
-        recent = [
-            m
-            for m in conversation_history[-8:]
-            if isinstance(m.get("content"), str)
-        ]
+        prompt_parts = []
+        if history_text:
+            prompt_parts.append(f"CONVERSATION HISTORY:\n{history_text}")
+        if context:
+            prompt_parts.append(f"CONTEXT:\n{context}")
+        prompt_parts.append(f"YOUR TASK:\n{task}")
+        prompt = "\n\n".join(prompt_parts)
 
-        task_msg = (
-            f"The project coordinator has assigned you this task:\n\n"
-            f"{task}\n\n"
-            f"Coordinator context:\n{context}"
+        try:
+            response = call_claude(prompt=prompt, system_prompt=system_prompt, model=self.model)
+        except Exception as e:
+            return f"(error calling {self.name}: {e})"
+
+        # Handle ASK_COLLEAGUE markers (one round only)
+        import re
+        colleagues_needed = re.findall(
+            r"ASK_COLLEAGUE:(\w+):\s*(.+?)(?=\nASK_COLLEAGUE:|$)", response, re.DOTALL
         )
-        messages = recent + [{"role": "user", "content": task_msg}]
+        if not colleagues_needed:
+            return response
 
-        loop_messages = messages
-        iterations = 0
-        max_iterations = 6
+        enriched_prompt = (
+            f"{prompt}\n\n"
+            "You previously indicated needing colleague input. Here are their answers:\n"
+        )
+        for colleague_role, question in colleagues_needed:
+            answer = self._get_peer_input(colleague_role.strip(), question.strip())
+            enriched_prompt += f"\n[{colleague_role.upper()}]: {answer}\n"
 
-        while iterations < max_iterations:
-            iterations += 1
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=2048,
-                system=system_prompt,
-                messages=loop_messages,
-                tools=tools,
+        enriched_prompt += "\nNow provide your complete response incorporating this input."
+
+        try:
+            return call_claude(
+                prompt=enriched_prompt, system_prompt=system_prompt, model=self.model
             )
-
-            if response.stop_reason == "end_turn":
-                parts = [b.text for b in response.content if hasattr(b, "text")]
-                return "\n".join(parts) or "(no response)"
-
-            if response.stop_reason == "tool_use":
-                tool_results = []
-                loop_messages = loop_messages + [
-                    {"role": "assistant", "content": response.content}
-                ]
-
-                for block in response.content:
-                    if block.type == "tool_use" and block.name == "consult_colleague":
-                        result = self._consult_peer(
-                            colleague_role=block.input["colleague_role"],
-                            question=block.input["question"],
-                        )
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result,
-                            }
-                        )
-
-                loop_messages = loop_messages + [
-                    {"role": "user", "content": tool_results}
-                ]
-            else:
-                break
-
-        return "(agent did not produce a final response)"
+        except Exception as e:
+            return response  # return original response if re-call fails

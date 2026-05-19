@@ -1,4 +1,4 @@
-model: claude-sonnet-4-6
+model: sonnet
 max_tokens: 4096
 max_tool_iterations: 12
 max_history_messages: 10

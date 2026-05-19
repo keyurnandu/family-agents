@@ -4,7 +4,7 @@ Tech Organization Agent System
 Run: python cli.py [--project NAME]
 """
 
-import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -16,12 +16,12 @@ console = Console()
 BASE_DIR = Path(__file__).parent
 
 
-def _check_api_key():
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+def _check_cli():
+    if not shutil.which("claude"):
         console.print(
-            "[bold red]Error:[/bold red] ANTHROPIC_API_KEY is not set.\n"
-            "Set it with:  [cyan]set ANTHROPIC_API_KEY=sk-ant-...[/cyan]  (Windows)\n"
-            "              [cyan]export ANTHROPIC_API_KEY=sk-ant-...[/cyan]  (Linux/Mac)"
+            "[bold red]Error:[/bold red] The [cyan]claude[/cyan] CLI is not installed or not in PATH.\n"
+            "Install Claude Code from [link]https://claude.ai/code[/link] and log in once,\n"
+            "then run this again — no API key needed."
         )
         sys.exit(1)
 
@@ -38,9 +38,9 @@ def main(project: str | None, list_projects: bool, model: str | None):
     Resume a project:      python cli.py --project my-app
     List projects:         python cli.py --list
     """
-    _check_api_key()
+    _check_cli()
 
-    # Late imports so the API key check fires first
+    # Late imports so the CLI check fires first
     from orchestrator import Orchestrator
     from utils.db_manager import DBManager
     from utils.display import Display
