@@ -17,6 +17,7 @@ Agents signal an action by wrapping content in a tagged code block:
 """
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -153,9 +154,10 @@ def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
                     action.content,
                     shell=True,
                     cwd=project_dir,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
+                    # inherit all streams so output/errors print live in the terminal
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                    stderr=sys.stderr,
                 )
                 if result.returncode == 0:
                     console.print("  [green]✓ Command completed.[/green]")

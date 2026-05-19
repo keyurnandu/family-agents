@@ -36,7 +36,9 @@ def call_claude(
 
     result = subprocess.run(
         cmd,
-        capture_output=True,
+        stdin=subprocess.DEVNULL,   # never consume terminal stdin
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         encoding="utf-8",
         errors="replace",
