@@ -68,10 +68,35 @@ def main(project: str | None, list_projects: bool, model: str | None):
     display.show_welcome()
 
     if not project:
-        project = Prompt.ask("\n[bold cyan]Project name[/bold cyan]").strip()
-        if not project:
-            console.print("[red]Project name cannot be empty.[/red]")
-            sys.exit(1)
+        while True:
+            project = Prompt.ask("\n[bold cyan]Project name[/bold cyan]").strip()
+            if not project:
+                console.print("[dim]Project name cannot be empty. Try again.[/dim]")
+                continue
+            if project.startswith("/"):
+                # User typed a slash command at the name prompt — handle the common ones
+                cmd = project.lower()
+                if cmd in ("/help", "/h"):
+                    display.show_help()
+                elif cmd == "/list":
+                    projects = db.list_projects()
+                    if not projects:
+                        console.print("\n[dim]No projects yet.[/dim]")
+                    else:
+                        console.print("\n[bold]Saved Projects[/bold]\n")
+                        for p in projects:
+                            console.print(
+                                f"  [cyan]{p['name']}[/cyan]  "
+                                f"[dim]{p['message_count']} messages · last active {p['last_active']}[/dim]"
+                            )
+                        console.print()
+                else:
+                    console.print(
+                        f"[yellow]'{project}' is not a valid project name.[/yellow]  "
+                        "[dim]Enter a name like 'my-app' or 'restaurant-saas'.[/dim]"
+                    )
+                continue
+            break
 
     project_dir = BASE_DIR / "projects" / project
     project_dir.mkdir(parents=True, exist_ok=True)   # always visible immediately
