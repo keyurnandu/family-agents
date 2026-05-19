@@ -72,6 +72,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
             console.print("[red]Project name cannot be empty.[/red]")
             sys.exit(1)
 
+    project_dir = BASE_DIR / "projects" / project
     existing = db.get_project(project)
     if existing:
         console.print(
@@ -81,6 +82,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
     else:
         console.print(f"\n[green]Starting new project:[/green] [bold]{project}[/bold]")
         db.ensure_project(project)
+    console.print(f"[dim]Project files will be written to:[/dim] [cyan]{project_dir}[/cyan]")
 
     orchestrator = Orchestrator(
         project_name=project,

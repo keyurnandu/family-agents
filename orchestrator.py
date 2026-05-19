@@ -305,7 +305,9 @@ class Orchestrator:
             # Permission-gated action execution
             actions = parse_actions(response, name)
             if actions:
-                outcomes = prompt_and_execute(actions, self.base_dir)
+                project_dir = self.base_dir / "projects" / self.project_name
+                project_dir.mkdir(parents=True, exist_ok=True)
+                outcomes = prompt_and_execute(actions, project_dir)
                 if outcomes:
                     agent_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
