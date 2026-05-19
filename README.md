@@ -8,16 +8,16 @@ No API key required. Runs entirely through your locally installed **Claude Code*
 
 ## The Team
 
-| | Agent | Name | Speciality |
-|---|---|---|---|
-| 🎯 | Orchestrator | **Aria** | Routes work between specialists, synthesizes responses, manages project memory |
-| 📋 | PM | **Alex** | Scope, timelines, risk management, stakeholder priorities |
-| 🔍 | BSA | **Morgan** | Requirements, user stories, acceptance criteria, process mapping |
-| 💻 | Developer | **Sam** | Implementation, APIs, database design, code architecture |
-| ⚡ | Tech Lead | **Jordan** | System design, technology selection, code review, non-functional requirements |
-| 🔬 | Researcher | **Riley** | Technology evaluation, best practices, comparative analysis |
-| ✅ | QA | **Casey** | Testing strategy, quality gates, test cases, edge cases |
-| 🚀 | DevOps | **Taylor** | CI/CD pipelines, cloud infrastructure, deployments, monitoring |
+| | Agent | Name | @mention | Speciality |
+|---|---|---|---|---|
+| 🎯 | Orchestrator | **Aria** | — | Routes work between specialists, synthesizes responses, manages project memory |
+| 📋 | PM | **Alex** | `@alex` | Scope, timelines, risk management, stakeholder priorities |
+| 🔍 | BSA | **Morgan** | `@morgan` | Requirements, user stories, acceptance criteria, process mapping |
+| 💻 | Developer | **Sam** | `@sam` | Implementation, APIs, database design, code architecture |
+| ⚡ | Tech Lead | **Jordan** | `@jordan` | System design, technology selection, code review, non-functional requirements |
+| 🔬 | Researcher | **Riley** | `@riley` | Technology evaluation, best practices, comparative analysis |
+| ✅ | QA | **Casey** | `@casey` | Testing strategy, quality gates, test cases, edge cases |
+| 🚀 | DevOps | **Taylor** | `@taylor` | CI/CD pipelines, cloud infrastructure, deployments, monitoring |
 
 **Default active team:** PM · BSA · Developer · Lead
 
@@ -47,10 +47,10 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-# Start — shows project picker if you have saved projects, or asks for a name on first run
+# Start — one You: prompt handles everything
 python cli.py
 
-# Skip the picker and jump straight into a project
+# Skip straight into a specific project
 python cli.py --project my-app
 
 # List all saved projects (non-interactive)
@@ -63,59 +63,61 @@ python cli.py --model haiku
 python cli.py --model opus
 ```
 
-### Startup picker
+### Startup
 
-On first run you'll be asked for a project name. On every subsequent run a numbered list of your projects appears — type a number to resume or type a new name to create:
+On launch you get a single `You:` prompt. The screen shows your saved projects (if any) and a one-line hint above it:
 
 ```
 ──────────────── Your Projects ────────────────
   1  restaurant-saas    3 msgs · today
   2  my-portfolio       12 msgs · Mon
+  💬 General chat  ·  5 msgs · today
 ────────────────────────────────────────────────
 
-Resume [1-2], new name, or /help :
+Type a number to resume, a name to start new, just start talking for adhoc questions, or /help.
+
+You: _
 ```
 
-`/help`, `/list`, and `/quit` all work at this prompt too.
-
-Once inside a project, just describe your work naturally.
-
-### General chat (no project needed)
-
-Not everything needs a project. Just start typing a question or sentence and the team answers immediately — no project name required:
-
-```
-You: what's the difference between REST and GraphQL?
-You: how should I structure a Node.js monorepo?
-You: @sam what are your capabilities?
-```
-
-The conversation is saved as **💬 General chat** so nothing is ever lost. Use `/new <name>` or `/switch` to move into a real project whenever you're ready.
-
-```
-You: I want to build a SaaS app for restaurant reservations
-```
-
-Aria routes your message to the right team members, they collaborate, and you get a unified response.
+| Input | What happens |
+|---|---|
+| `1` | Resume project #1 |
+| `my-app` | Create / open project named my-app |
+| `what is REST?` | Auto-routes to general chat (no project needed) |
+| `/help` | Show help panel |
+| `/team` | Show team roster |
+| `/quit` | Exit |
 
 ---
 
 ## Talking to the Team
 
-**Normal message** — Aria routes automatically to the right agents, who work in parallel:
+**Normal message** — Aria routes automatically to the right agents, who work in parallel within each phase:
 ```
 You: build a login page with HTML, CSS, and JS
 → Sam (Developer) and Jordan (Lead) work simultaneously
 → Aria synthesizes their responses
 ```
 
-**@mention** — talk directly to one specific agent, skipping routing:
+**@mention** — talk directly to one agent by name, skipping routing entirely:
 ```
 @sam add unit tests for the calculator
 @jordan what architecture would you recommend?
 @morgan write user stories for the checkout flow
 @riley compare Redis vs Memcached for our use case
+@casey what edge cases should we test?
+@taylor set up a CI/CD pipeline
 ```
+
+Both the friendly name (`@sam`) and the role key (`@developer`) are accepted.
+
+**General chat** — no project needed. Just start talking and the team answers:
+```
+You: what's the difference between REST and GraphQL?
+You: how should I structure a Node.js monorepo?
+You: @sam what are your capabilities?
+```
+Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch` to move into a project anytime.
 
 **Ctrl+C** — interrupt any running agent and return to the prompt immediately.
 
@@ -125,13 +127,14 @@ You: build a login page with HTML, CSS, and JS
 
 | Command | Description |
 |---|---|
-| `/team` | Show the active team roster |
+| `/team` | Show active team roster with @mention shortcuts |
 | `/add <role>` | Add an agent (e.g. `/add qa`) |
 | `/remove <role>` | Remove an agent (e.g. `/remove devops`) |
 | `/memory` | View everything saved to project memory |
 | `/history` | Show recent conversation turns |
 | `/project` | Show project stats (messages, memory items, model) |
-| `/switch [name]` | Switch to another project (shows picker if no name given) |
+| `/switch [name\|number]` | Switch to another project — shows picker if no arg |
+| `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
 | `/help` | Show full help |
@@ -160,11 +163,25 @@ You
             You
 ```
 
+### Phase-Aware Workflow
+
+For complex tasks Aria automatically organises work into **sequential phases**, so each team hands off to the next only when their work is done. Agents **within a phase run in parallel**.
+
+```
+Phase 1 — Requirements    PM + BSA work in parallel
+               │  output fed as context ↓
+Phase 2 — Implementation  Developer + Lead work in parallel
+               │  output fed as context ↓
+Phase 3 — QA              Casey tests the implementation
+               │  output fed as context ↓
+Phase 4 — DevOps          Taylor deploys after QA passes
+```
+
+Simple questions or discussions are handled in a single phase — everyone answers in parallel immediately. Aria decides the right shape for every message.
+
 ### Auto-Scaffolding
 
-When you describe a new project for the first time, Developer and Lead automatically scaffold the full folder and file structure to developer standards — before any feature work begins.
-
-What gets created (permission-prompted before each file is written):
+When you describe a new project for the first time, Developer and Lead automatically scaffold the full folder and file structure to developer standards — before any feature work begins. Every file is permission-prompted before it is written.
 
 | File / Folder | Description |
 |---|---|
@@ -176,25 +193,7 @@ What gets created (permission-prompted before each file is written):
 | Entry point | `src/index.js`, `src/main.py`, `src/App.tsx`, etc. with starter boilerplate |
 | Config files | `tsconfig.json`, `.eslintrc`, `pytest.ini`, `Makefile`, etc. as appropriate |
 
-The tech stack is inferred from your description. If ambiguous, sensible defaults are chosen. Scaffolding only runs once — on the first message of a new project.
-
----
-
-### Phase-Aware Workflow
-
-For complex tasks Aria automatically organises work into **sequential phases**, so each team hands off to the next only when their work is done. Agents **within a phase run in parallel**.
-
-```
-Phase 1 — Requirements  (PM + BSA work in parallel)
-          │  output fed as context →
-Phase 2 — Implementation  (Developer + Lead work in parallel)
-          │  output fed as context →
-Phase 3 — QA  (Casey tests the implementation)
-          │  output fed as context →
-Phase 4 — DevOps  (Taylor deploys after QA passes)
-```
-
-Simple questions or discussions that don't need sequencing are handled in a single phase (everyone works in parallel immediately). Aria decides the right shape for every message.
+Tech stack is inferred from your description. Scaffolding runs exactly once — on the first message of a new project. Skipped for general chat.
 
 ### Memory
 
@@ -213,7 +212,7 @@ Use `/memory` at any time to review what's been captured.
 
 ### Conversation History
 
-Full conversation history is stored in `db/conversations.db` (SQLite). When you resume a project with `--project <name>`, the last session's context loads automatically.
+Full conversation history is stored in `db/conversations.db` (SQLite). When you resume a project, the last session's context loads automatically.
 
 ---
 
@@ -237,7 +236,7 @@ family-agents/
 │       └── devops.md
 ├── projects/                 # Agent-created files land here (one folder per project)
 │   └── <project-name>/
-│       ├── index.html
+│       ├── src/
 │       └── ...
 ├── utils/
 │   ├── action_executor.py    # Permission-prompted file/command execution
@@ -251,6 +250,28 @@ family-agents/
 ```
 
 > `db/`, `memory/dynamic/`, and `projects/*/` are excluded from git — they contain your local project data. The `projects/` folder itself is tracked so it exists on a fresh clone.
+
+---
+
+## Where Project Files Go
+
+When an agent creates a file or runs a command, a permission prompt appears in your terminal before anything executes:
+
+```
+💻 Sam wants to write  src/app.py
+╭─ Create  src/app.py ─────────────────────╮
+│  1  def main():                           │
+│  2      print("Hello!")                   │
+╰──────────────────────────────────────────╯
+  Allow? [y/N]:
+```
+
+All approved files are written to:
+```
+family-agents/projects/<project-name>/
+```
+
+Each project gets its own subfolder — your source code is never touched.
 
 ---
 
@@ -297,31 +318,9 @@ agent_personas:
 
 ---
 
-## Where Project Files Go
-
-When an agent creates a file or runs a command, a permission prompt appears in your terminal before anything executes:
-
-```
-💻 Sam wants to write  src/app.py
-╭─ Create  src/app.py ─────────────────────╮
-│  1  def main():                           │
-│  2      print("Hello!")                   │
-╰──────────────────────────────────────────╯
-  Allow? [y/N]:
-```
-
-All approved files are written to:
-```
-family-agents/projects/<project-name>/
-```
-
-The `projects/` folder is created automatically when you start a session. Each project gets its own subfolder — source code is never touched.
-
----
-
 ## How It Uses Claude Code
 
-Every agent call is a `claude --print` subprocess — the same Claude you're already running. No SDK, no API key, no extra cost beyond your existing Claude subscription. The system passes each agent's role definition as a `--system-prompt` and the task as the prompt argument.
+Every agent call is a `claude --print` subprocess — the same Claude you're already running. No SDK, no API key, no extra cost beyond your existing Claude subscription.
 
 ```
 python cli.py

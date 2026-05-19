@@ -13,8 +13,11 @@ class Display:
             "[bold cyan]Tech Organization Agent System[/bold cyan]\n\n"
             "Your AI development team is ready to collaborate.\n"
             "You are the [bold white]Customer[/bold white] — describe your project, ask questions,\n"
-            "and the team will handle requirements, architecture, and planning.\n\n"
-            "[dim]Type [bold]/help[/bold] to see available commands.[/dim]",
+            "and the team handles requirements, architecture, planning, and code.\n\n"
+            "[dim]· Type a [bold]number[/bold] to resume a project  "
+            "· Type a [bold]name[/bold] to start new\n"
+            "· [bold]Just start talking[/bold] for quick adhoc questions (no project needed)\n"
+            "· Type [bold]/help[/bold] for all commands[/dim]",
             title="[bold]Welcome[/bold]",
             border_style="cyan",
             padding=(1, 2),
@@ -50,6 +53,7 @@ class Display:
         )
         table.add_column("Role", style="dim")
         table.add_column("Name")
+        table.add_column("@mention", style="cyan")
         table.add_column("Speciality")
 
         descriptions = {
@@ -67,9 +71,11 @@ class Display:
             name = p.get("name", role.upper())
             emoji = p.get("emoji", "")
             color = p.get("color", "white")
+            mention = f"@{name.lower()}"
             table.add_row(
                 role,
                 f"{emoji} [{color}]{name}[/{color}]",
+                mention,
                 descriptions.get(role, "—"),
             )
 
