@@ -44,37 +44,49 @@ class Agent:
             else "## Project Memory\nNone yet."
         )
 
-        return (
-            f"You are {self.name}, a {self.role.upper()} on a software development team.\n\n"
-            f"{role_memory}\n\n"
-            f"{project_section}\n\n"
+        return "\n\n".join([
+            f"You are {self.name}, a {self.role.upper()} on a software development team.",
+
+            # Hard constraint — must come before role memory so it takes priority
+            "## CRITICAL CONSTRAINT\n"
+            "You are running as a TEXT-ONLY agent. "
+            "You have NO access to Write, Edit, Read, Bash, or any file-system tools. "
+            "Do NOT attempt to call any tools. "
+            "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
+            "none of that applies here. "
+            "The ONLY way to deliver files or run commands is via EXEC: tagged blocks in your text.",
+
+            role_memory,
+            project_section,
+
             "## Working Instructions\n"
             "- Stay in your domain — answer from your role's perspective\n"
-            "- Be specific and actionable; skip vague generalities\n"
+            "- Be specific and actionable\n"
             "- Ask clarifying questions when requirements are ambiguous\n"
-            "- If you learn something that must persist across sessions, prefix it with REMEMBER:\n"
-            "- If you need a colleague's input, prefix the question with ASK_COLLEAGUE:<role>: <question>\n\n"
-            "## Creating Files or Running Commands — MANDATORY FORMAT\n"
-            "IMPORTANT: Whenever your response includes file content or shell commands that "
-            "should actually be executed, you MUST output them using EXEC: tags. "
-            "Do NOT ask 'should I create this?' — just output the EXEC: block. "
-            "The system will automatically show it to the customer for approval before running anything.\n\n"
-            "Write a file (use the exact format below, including the ``` fences):\n"
-            "EXEC:file:path/to/filename.ext\n"
+            "- Prefix persistent facts with REMEMBER:\n"
+            "- Prefix peer questions with ASK_COLLEAGUE:<role>: <question>",
+
+            "## Delivering Files and Commands\n"
+            "Output EXEC: blocks and the system will show the customer a permission prompt "
+            "before anything is executed.\n"
+            "\n"
+            "Write a file:\n"
+            "EXEC:file:path/to/file.ext\n"
             "```\n"
-            "<complete file content here>\n"
-            "```\n\n"
+            "<full file content>\n"
+            "```\n"
+            "\n"
             "Run a shell command:\n"
             "EXEC:bash\n"
             "```\n"
-            "<shell commands here>\n"
-            "```\n\n"
-            "Rules:\n"
-            "- Always include a short explanation before each EXEC: block\n"
-            "- Use the real file path (relative to the project root)\n"
-            "- Include the complete file content, not a snippet\n"
-            "- Do NOT wrap EXEC: blocks in outer markdown — use them at the top level"
-        )
+            "<commands>\n"
+            "```\n"
+            "\n"
+            "- Explain what you are doing BEFORE each EXEC: block\n"
+            "- Always include the COMPLETE file content, never a partial snippet\n"
+            "- Use relative paths from the project root\n"
+            "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions",
+        ])
 
     def _get_peer_input(self, colleague_role: str, question: str) -> str:
         """Ask a peer agent a single question (no further nesting)."""
@@ -102,6 +114,7 @@ class Agent:
 
     def respond(self, task: str, context: str, history_text: str) -> str:
         """Generate a response, handling one round of peer consultation if needed."""
+        import re
         system_prompt = self._build_system_prompt()
 
         prompt_parts = []
@@ -118,7 +131,6 @@ class Agent:
             return f"(error calling {self.name}: {e})"
 
         # Handle ASK_COLLEAGUE markers (one round only)
-        import re
         colleagues_needed = re.findall(
             r"ASK_COLLEAGUE:(\w+):\s*(.+?)(?=\nASK_COLLEAGUE:|$)", response, re.DOTALL
         )
@@ -140,4 +152,4 @@ class Agent:
                 prompt=enriched_prompt, system_prompt=system_prompt, model=self.model
             )
         except Exception as e:
-            return response  # return original response if re-call fails
+            return response
