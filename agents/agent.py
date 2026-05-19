@@ -45,7 +45,9 @@ class Agent:
             else "## Project Memory\nNone yet."
         )
 
-        return "\n\n".join([
+        skills_text = self.memory.load_skills(self.role)
+
+        sections = [
             f"You are {self.name}, a {self.role.upper()} on a software development team.",
 
             # Hard constraint — must come before role memory so it takes priority
@@ -59,14 +61,18 @@ class Agent:
 
             role_memory,
             project_section,
-
+        ]
+        if skills_text:
+            sections.append(f"## Additional Skills & Expertise\n{skills_text}")
+        sections.append(
             "## Working Instructions\n"
             "- Stay in your domain — answer from your role's perspective\n"
             "- Be specific and actionable\n"
             "- Ask clarifying questions when requirements are ambiguous\n"
             "- Prefix persistent facts with REMEMBER:\n"
-            "- Prefix peer questions with ASK_COLLEAGUE:<role>: <question>",
-
+            "- Prefix peer questions with ASK_COLLEAGUE:<role>: <question>"
+        )
+        sections.append(
             "## Delivering Files and Commands\n"
             "Output EXEC: blocks and the system will show the customer a permission prompt "
             "before anything is executed.\n"
@@ -86,8 +92,9 @@ class Agent:
             "- Explain what you are doing BEFORE each EXEC: block\n"
             "- Always include the COMPLETE file content, never a partial snippet\n"
             "- Use relative paths from the project root\n"
-            "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions",
-        ])
+            "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions"
+        )
+        return "\n\n".join(sections)
 
     def _get_peer_input(self, colleague_role: str, question: str) -> str:
         """Ask a peer agent a single question (no further nesting)."""

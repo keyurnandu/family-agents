@@ -44,7 +44,7 @@ class Display:
             f"\n[dim green]💾 Saved to memory  [{category}]  {short}[/dim green]"
         )
 
-    def show_team(self, active_roster: list, personas: dict):
+    def show_team(self, active_roster: list, personas: dict, skill_counts: dict | None = None):
         table = Table(
             title="Current Team Roster",
             show_header=True,
@@ -54,6 +54,7 @@ class Display:
         table.add_column("Role", style="dim")
         table.add_column("Name")
         table.add_column("@mention", style="cyan")
+        table.add_column("Skills", style="dim", justify="right")
         table.add_column("Speciality")
 
         descriptions = {
@@ -72,16 +73,39 @@ class Display:
             emoji = p.get("emoji", "")
             color = p.get("color", "white")
             mention = f"@{name.lower()}"
+            count = str(skill_counts.get(role, 0)) if skill_counts else "—"
             table.add_row(
                 role,
                 f"{emoji} [{color}]{name}[/{color}]",
                 mention,
+                count,
                 descriptions.get(role, "—"),
             )
 
         console.print()
         console.print(table)
         console.print()
+
+    def show_skills(self, skills: dict, personas: dict):
+        if not skills:
+            console.print("\n[dim]No skills saved yet. Use /skill add <role> to teach the team.[/dim]\n")
+            return
+        console.print()
+        for role, skill_list in skills.items():
+            p = personas.get(role, {})
+            name = p.get("name", role.upper())
+            emoji = p.get("emoji", "")
+            color = p.get("color", "white")
+            console.rule(
+                f"{emoji} [{color}]{name}[/{color}] [dim]({role}) — {len(skill_list)} skill(s)[/dim]",
+                style=color
+            )
+            for skill in skill_list:
+                console.print(f"  [cyan]•[/cyan] [bold]{skill['name']}[/bold]")
+                if skill['preview']:
+                    preview = skill['preview'][:100].replace('\n', ' ')
+                    console.print(f"    [dim]{preview}…[/dim]")
+            console.print()
 
     def show_memory(self, entries: list, project_name: str):
         if not entries:
@@ -150,6 +174,9 @@ class Display:
             "  [cyan]/memory[/cyan]            Show project memory\n"
             "  [cyan]/history[/cyan]           Show recent conversation\n"
             "  [cyan]/clear[/cyan]             Clear context window (keeps memory)\n"
+            "  [cyan]/skill list [role][/cyan]   List skills for a role (or all roles)\n"
+            "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
+            "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
             "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"
             "  [cyan]/new <name>[/cyan]        Create and switch to a brand new project\n"

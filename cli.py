@@ -333,6 +333,46 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd == "/clear":
                 orchestrator.clear_context()
 
+            elif parts[0] == "/skill":
+                sub = (parts[1] if len(parts) > 1 else "").split(None, 2)
+                action = sub[0] if sub else ""
+                if action == "list":
+                    role_f = sub[1] if len(sub) > 1 else None
+                    orchestrator.show_skills(role_f)
+                elif action == "add":
+                    role_str = sub[1].strip() if len(sub) > 1 else ""
+                    skill_name_arg = sub[2].strip() if len(sub) > 2 else ""
+                    if not role_str:
+                        console.print("[yellow]Usage:[/yellow] /skill add <role> [skill-name]  e.g. /skill add developer react-native")
+                    else:
+                        if not skill_name_arg:
+                            try:
+                                skill_name_arg = Prompt.ask("[bold cyan]Skill name[/bold cyan] (e.g. react-native, aws)").strip()
+                            except (KeyboardInterrupt, EOFError):
+                                console.print("\n[dim]Cancelled.[/dim]")
+                                continue
+                        if skill_name_arg:
+                            try:
+                                desc = Prompt.ask(
+                                    f"[bold cyan]Describe what they should know[/bold cyan] "
+                                    "[dim](Enter to auto-generate)[/dim]"
+                                ).strip()
+                            except (KeyboardInterrupt, EOFError):
+                                desc = ""
+                            orchestrator.add_skill(role_str, skill_name_arg, desc)
+                elif action == "remove":
+                    if len(sub) < 3:
+                        console.print("[yellow]Usage:[/yellow] /skill remove <role> <skill-name>")
+                    else:
+                        orchestrator.remove_skill(sub[1].strip(), sub[2].strip())
+                else:
+                    console.print(
+                        "[dim]Usage:\n"
+                        "  /skill list [role]              — list skills\n"
+                        "  /skill add <role> [name]        — add a skill\n"
+                        "  /skill remove <role> <name>     — remove a skill[/dim]"
+                    )
+
             # ── /switch [name|number] ─────────────────────────────────
             elif parts[0] == "/switch":
                 saved = db.list_projects()

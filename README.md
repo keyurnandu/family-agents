@@ -144,6 +144,31 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 
 ---
 
+## Teaching the Team New Skills
+
+Any agent can be taught new skills that persist across all projects and sessions. Skills are stored as markdown files in `memory/skills/<role>/` and are automatically included in the agent's system prompt.
+
+### Natural language — just tell the team:
+```
+You: teach sam React Native
+You: the dev team needs to learn AWS
+You: morgan should know event storming
+You: add GraphQL expertise to jordan
+```
+
+### Command:
+```
+/skill add developer          → prompted for skill name and description
+/skill add developer aws      → prompted for description only
+/skill list                   → show all skills for all roles
+/skill list developer         → show Sam's skills
+/skill remove developer aws   → remove a skill
+```
+
+Skills show up in `/team` as a count next to each agent so you always know what the team has learned. Skill content is AI-generated from your description — a few focused bullet points are added to the agent's system prompt.
+
+---
+
 ## How It Works
 
 ### Orchestration

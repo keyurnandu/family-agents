@@ -85,3 +85,64 @@ class MemoryManager:
         memory_file = self.dynamic_dir / "memory.md"
         if memory_file.exists():
             memory_file.unlink()
+
+    # ------------------------------------------------------------------
+    # Skills
+    # ------------------------------------------------------------------
+
+    @property
+    def _skills_dir(self) -> Path:
+        return self.base_dir / "memory" / "skills"
+
+    def load_skills(self, role: str) -> str:
+        """Load all skill files for a role, return combined markdown."""
+        role_dir = self._skills_dir / role
+        if not role_dir.exists():
+            return ""
+        files = sorted(role_dir.glob("*.md"))
+        parts = [f.read_text(encoding="utf-8").strip() for f in files]
+        return "\n\n---\n\n".join(p for p in parts if p)
+
+    def save_skill(self, role: str, skill_name: str, content: str) -> Path:
+        role_dir = self._skills_dir / role
+        role_dir.mkdir(parents=True, exist_ok=True)
+        filename = re.sub(r"[^\w\-]", "-", skill_name.lower()).strip("-") + ".md"
+        path = role_dir / filename
+        path.write_text(content.strip(), encoding="utf-8")
+        return path
+
+    def list_skills(self, role: str | None = None) -> dict[str, list[dict]]:
+        """Returns {role: [{name, preview}]}."""
+        base = self._skills_dir
+        if not base.exists():
+            return {}
+        if role:
+            roles_to_check = [role]
+        else:
+            roles_to_check = [d.name for d in sorted(base.iterdir()) if d.is_dir()]
+        result = {}
+        for r in roles_to_check:
+            d = base / r
+            if not d.exists():
+                continue
+            skills = []
+            for f in sorted(d.glob("*.md")):
+                content = f.read_text(encoding="utf-8").strip()
+                skills.append({"name": f.stem, "preview": content[:120]})
+            if skills:
+                result[r] = skills
+        return result
+
+    def delete_skill(self, role: str, skill_name: str) -> bool:
+        filename = re.sub(r"[^\w\-]", "-", skill_name.lower()).strip("-") + ".md"
+        path = self._skills_dir / role / filename
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
+    def skill_count(self, role: str) -> int:
+        role_dir = self._skills_dir / role
+        if not role_dir.exists():
+            return 0
+        return len(list(role_dir.glob("*.md")))

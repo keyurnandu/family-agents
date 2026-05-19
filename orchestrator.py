@@ -101,6 +101,14 @@ ROUTING_SCHEMA = {
     "required": ["phases"],
 }
 
+# Patterns that signal the user wants to teach an agent a new skill
+_TEACH_PATTERNS = [
+    (r"(?:please\s+)?teach\s+(?:the\s+)?(\w+)(?:\s+team)?\s+(.+)", 1, 2),
+    (r"(\w+)(?:\s+team)?\s+needs?\s+to\s+(?:learn|know|understand|use)\s+(.+)", 1, 2),
+    (r"add\s+(.+?)\s+(?:skill|knowledge|expertise\s+)?to\s+(?:the\s+)?(\w+)(?:\s+team)?", 2, 1),
+    (r"(\w+)(?:\s+team)?\s+should\s+(?:learn|know|understand|use)\s+(.+)", 1, 2),
+]
+
 
 class Orchestrator:
     def __init__(
@@ -382,6 +390,19 @@ class Orchestrator:
                 if saved:
                     self.display.show_memory_saved("requirement", m.group(1).strip())
 
+        # Detect natural-language teaching intent
+        for pattern, role_group, skill_group in _TEACH_PATTERNS:
+            m = re.search(pattern, user_input, re.IGNORECASE)
+            if m:
+                identifier = m.group(role_group).strip()
+                skill_desc = m.group(skill_group).strip().rstrip(".,!")
+                role = self._resolve_role(identifier)
+                if role and role != "orchestrator":
+                    words = skill_desc.split()
+                    skill_name = words[0].lower() if len(words) <= 2 else "-".join(w.lower() for w in words[:3])
+                    self.add_skill(role, skill_name, skill_desc)
+                break  # only match first pattern
+
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
             routing = self._get_routing(user_input)
@@ -656,6 +677,64 @@ class Orchestrator:
     # Slash command handlers
     # ------------------------------------------------------------------
 
+    def _generate_skill_content(self, role: str, agent_name: str, skill_description: str) -> str:
+        """Ask Claude to expand a raw skill description into proper agent instructions."""
+        prompt = (
+            f"Write a concise skill definition to add to {agent_name}'s ({role}) system prompt.\n"
+            f"Skill to add: {skill_description}\n\n"
+            "Write 4-6 bullet points of specific, actionable instructions. "
+            "Start with a heading: ## Skill: <name>\n"
+            "Cover: what they know, how they apply it, and key best practices."
+        )
+        try:
+            return call_claude(
+                prompt=prompt,
+                system_prompt="You write concise agent skill definitions. Be specific and actionable.",
+                model=self.model,
+            )
+        except Exception:
+            return f"## Skill: {skill_description}\n\n- You have expertise in {skill_description}.\n- Apply best practices for {skill_description} in all relevant work."
+
+    def add_skill(self, role_or_name: str, skill_name: str, description: str = "") -> bool:
+        """Generate and save a skill for a role. Returns True on success."""
+        role = self._resolve_role(role_or_name)
+        if not role or role == "orchestrator":
+            console.print(f"[red]Unknown role:[/red] {role_or_name}")
+            return False
+        persona = self.config["agent_personas"].get(role, {})
+        agent_name = persona.get("name", role.upper())
+        full_desc = f"{skill_name}: {description}" if description else skill_name
+        with console.status(f"[dim]Generating skill definition for {agent_name}…[/dim]", spinner="dots"):
+            content = self._generate_skill_content(role, agent_name, full_desc)
+            self.memory.save_skill(role, skill_name, content)
+        p = self.config["agent_personas"].get(role, {})
+        console.print(
+            f"\n[green]✓ Skill saved:[/green] [bold]{skill_name}[/bold] → "
+            f"{p.get('emoji','')} {agent_name} ({role})\n"
+            f"[dim]{agent_name} will apply this from the next response onwards.[/dim]\n"
+        )
+        return True
+
+    def remove_skill(self, role_or_name: str, skill_name: str):
+        role = self._resolve_role(role_or_name)
+        if not role:
+            console.print(f"[red]Unknown role:[/red] {role_or_name}")
+            return
+        persona = self.config["agent_personas"].get(role, {})
+        agent_name = persona.get("name", role.upper())
+        if self.memory.delete_skill(role, skill_name):
+            console.print(f"[green]✓ Removed skill:[/green] [bold]{skill_name}[/bold] from {agent_name}")
+        else:
+            console.print(f"[yellow]Skill not found:[/yellow] {skill_name} on {agent_name}")
+
+    def show_skills(self, role_filter: str | None = None):
+        if role_filter:
+            resolved = self._resolve_role(role_filter)
+            if resolved:
+                role_filter = resolved
+        skills = self.memory.list_skills(role_filter)
+        self.display.show_skills(skills, self.config["agent_personas"])
+
     def add_agent(self, role: str):
         p = self.config["agent_personas"]
         if role in self.active_roster:
@@ -684,7 +763,8 @@ class Orchestrator:
             )
 
     def show_team(self):
-        self.display.show_team(self.active_roster, self.config["agent_personas"])
+        counts = {role: self.memory.skill_count(role) for role in self.active_roster}
+        self.display.show_team(self.active_roster, self.config["agent_personas"], skill_counts=counts)
 
     def show_memory(self):
         self.display.show_memory(self.memory.list_memory_entries(), self.project_name)
