@@ -148,6 +148,13 @@ class Orchestrator:
                 orchestrator=self,
             )
 
+        # True only for brand-new projects with no prior history.
+        # Triggers auto-scaffolding after the first message.
+        # Skipped for the _general chat workspace.
+        self.is_new_project: bool = (
+            len(history) == 0 and project_name != "_general"
+        )
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -215,6 +222,104 @@ class Orchestrator:
             "If there are open questions for the customer, group them at the end."
         )
         return "\n".join(parts)
+
+    def _scaffold_project(self, user_input: str, requirements_output: dict):
+        """
+        Run once after the first message of a new project.
+        Developer + Lead propose and create the full folder/file structure.
+        All file writes are permission-gated via the normal EXEC: flow.
+        """
+        personas = self.config["agent_personas"]
+        project_dir = self.base_dir / "projects" / self.project_name
+
+        console.print(
+            "\n[bold bright_cyan]🏗️  Scaffolding project structure…[/bold bright_cyan]"
+            "  [dim](Developer standards — you'll be asked before anything is written)[/dim]\n"
+        )
+
+        # Summarise what was gathered in the requirements phase
+        req_summary = ""
+        if requirements_output:
+            parts = []
+            for role, resp in requirements_output.items():
+                name = personas.get(role, {}).get("name", role.upper())
+                parts.append(f"[{name}]:\n{resp[:1000]}")
+            req_summary = "\n\n".join(parts)
+
+        scaffold_task = (
+            f"Project name: {self.project_name}\n"
+            f"Customer description: {user_input}\n\n"
+            + (f"Requirements gathered so far:\n{req_summary}\n\n" if req_summary else "")
+            + "Your job is to scaffold the complete project structure to developer standards.\n\n"
+            "Create ALL of the following using EXEC:file: blocks:\n"
+            "1. README.md — project name, one-line description, tech stack, setup steps, usage\n"
+            "2. .gitignore — appropriate for the chosen tech stack\n"
+            "3. .env.example — placeholder environment variables (no real secrets)\n"
+            "4. Dependency file — package.json / requirements.txt / pom.xml / go.mod / etc.\n"
+            "5. Folder structure — create a .gitkeep in each empty directory so it exists\n"
+            "6. Entry point — e.g. src/index.js, src/main.py, src/App.tsx with basic boilerplate\n"
+            "7. Any stack-specific config — tsconfig.json, .eslintrc, pytest.ini, Makefile, etc.\n\n"
+            "Rules:\n"
+            "- Infer the tech stack from the description. If ambiguous, pick sensible defaults.\n"
+            "- Use relative paths from the project root.\n"
+            "- Every file must have real starter content — no empty files except .gitkeep.\n"
+            "- Follow the conventions of the chosen stack exactly.\n"
+            "- Do NOT ask for permission or confirmation — output all EXEC: blocks now."
+        )
+
+        # Run Developer and Lead in parallel for scaffolding
+        scaffold_roles = [r for r in ["developer", "lead"] if r in self.active_roster]
+        if not scaffold_roles:
+            scaffold_roles = self.active_roster[:1]
+
+        def _scaffold_one(role: str) -> tuple[str, str]:
+            agent = self.agents.get(role)
+            if not agent:
+                return role, ""
+            return role, agent.respond(
+                task=scaffold_task,
+                context=f"Scaffolding new project: {self.project_name}",
+                history_text="",
+            )
+
+        scaffold_responses: dict[str, str] = {}
+        working = {r: personas.get(r, {}) for r in scaffold_roles}
+        status_parts = [
+            f"[{p.get('color','white')}]{p.get('emoji','')} {p.get('name', r)}[/{p.get('color','white')}]"
+            for r, p in working.items()
+        ]
+        status_msg = "  ".join(status_parts) + "  [dim]scaffolding…[/dim]"
+
+        try:
+            with console.status(status_msg, spinner="dots"):
+                with ThreadPoolExecutor(max_workers=len(scaffold_roles)) as pool:
+                    futures = {pool.submit(_scaffold_one, r): r for r in scaffold_roles}
+                    for future in as_completed(futures):
+                        role, response = future.result()
+                        if response:
+                            scaffold_responses[role] = response
+        except KeyboardInterrupt:
+            console.print("\n[yellow]⚡ Scaffolding interrupted.[/yellow]")
+            return
+
+        # Display responses and execute permission-gated file writes
+        for role, response in scaffold_responses.items():
+            p = personas.get(role, {})
+            self.display.show_agent_response(
+                p.get("name", role.upper()), response, p.get("color", "white"), p.get("emoji", "")
+            )
+            actions = parse_actions(response, p.get("name", role.upper()))
+            if actions:
+                prompt_and_execute(actions, project_dir)
+
+            self.memory.extract_and_save_memories(response, role)
+
+        console.print(
+            "\n[dim]🏗️  Scaffold complete — "
+            "project structure is ready in [cyan]projects/"
+            + self.project_name
+            + "/[/cyan][/dim]\n"
+        )
 
     # ------------------------------------------------------------------
     # Core routing
@@ -411,6 +516,11 @@ class Orchestrator:
 
         # alias for synthesis block below
         agent_responses = all_agent_responses
+
+        # ── Auto-scaffold on first message of a new project ───────────
+        if self.is_new_project and agent_responses:
+            self.is_new_project = False  # only once per project lifetime
+            self._scaffold_project(user_input, agent_responses)
 
         # Synthesize if multiple agents responded; otherwise Aria speaks directly
         final_response = ""

@@ -160,6 +160,26 @@ You
             You
 ```
 
+### Auto-Scaffolding
+
+When you describe a new project for the first time, Developer and Lead automatically scaffold the full folder and file structure to developer standards — before any feature work begins.
+
+What gets created (permission-prompted before each file is written):
+
+| File / Folder | Description |
+|---|---|
+| `README.md` | Project overview, tech stack, setup steps |
+| `.gitignore` | Stack-appropriate ignores |
+| `.env.example` | Placeholder environment variables |
+| `package.json` / `requirements.txt` / etc. | Dependency file for the chosen stack |
+| `src/` / `lib/` / `app/` | Source folders with `.gitkeep` |
+| Entry point | `src/index.js`, `src/main.py`, `src/App.tsx`, etc. with starter boilerplate |
+| Config files | `tsconfig.json`, `.eslintrc`, `pytest.ini`, `Makefile`, etc. as appropriate |
+
+The tech stack is inferred from your description. If ambiguous, sensible defaults are chosen. Scaffolding only runs once — on the first message of a new project.
+
+---
+
 ### Phase-Aware Workflow
 
 For complex tasks Aria automatically organises work into **sequential phases**, so each team hands off to the next only when their work is done. Agents **within a phase run in parallel**.
