@@ -12,6 +12,7 @@ from pathlib import Path
 import click
 from rich.console import Console
 from rich.prompt import Prompt
+from rich.table import Table
 
 console = Console()
 BASE_DIR = Path(__file__).parent
@@ -25,6 +26,86 @@ def _check_cli():
             "then run this again — no API key needed."
         )
         sys.exit(1)
+
+
+def _show_project_picker(projects: list) -> None:
+    """Print the numbered project list."""
+    table = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    table.add_column("Num", style="bold cyan", no_wrap=True)
+    table.add_column("Name", style="bold white", no_wrap=True)
+    table.add_column("Info", style="dim")
+    for i, p in enumerate(projects, 1):
+        table.add_row(
+            str(i),
+            p["name"],
+            f"{p['message_count']} msgs · {p['last_active']}",
+        )
+    console.print()
+    console.rule("[bold]Your Projects[/bold]", style="cyan")
+    console.print(table)
+    console.rule(style="dim")
+
+
+def _pick_project(db, display) -> str:
+    """
+    Interactive project picker shown on startup when no --project flag was given.
+
+    - No saved projects  →  ask for a name (first-run experience)
+    - Saved projects exist →  show numbered list; accept number, new name, or /command
+    """
+    while True:
+        saved = db.list_projects()
+
+        if not saved:
+            # First run — keep it simple
+            console.print("\n[dim]No projects yet. Give your first project a name to get started.[/dim]")
+            prompt_text = "[bold cyan]Project name[/bold cyan]"
+        else:
+            _show_project_picker(saved)
+            prompt_text = (
+                "[bold cyan]Resume [dim][1"
+                + (f"-{len(saved)}" if len(saved) > 1 else "")
+                + "][/dim], new name, or [dim]/help[/dim][/bold cyan]"
+            )
+
+        raw = Prompt.ask(f"\n{prompt_text}").strip()
+
+        # Empty input → re-prompt
+        if not raw:
+            continue
+
+        # Slash commands
+        if raw.startswith("/"):
+            cmd = raw.lower()
+            if cmd in ("/help", "/h"):
+                display.show_help()
+            elif cmd == "/list":
+                pass  # loop will re-draw the list on next iteration
+            elif cmd in ("/quit", "/exit", "/q"):
+                console.print("[dim]Goodbye![/dim]")
+                sys.exit(0)
+            else:
+                console.print(
+                    f"[yellow]Unknown command:[/yellow] {raw}  "
+                    "[dim]Available here: /help · /list · /quit[/dim]"
+                )
+            continue
+
+        # Numeric selection → resume existing project
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(saved):
+                return saved[idx]["name"]
+            console.print(f"[yellow]Please enter a number between 1 and {len(saved)}.[/yellow]")
+            continue
+
+        # Anything else → treat as a new (or existing) project name
+        # Reject obviously bad names
+        if "/" in raw or "\\" in raw:
+            console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
+            continue
+
+        return raw
 
 
 @click.command()
@@ -68,35 +149,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
     display.show_welcome()
 
     if not project:
-        while True:
-            project = Prompt.ask("\n[bold cyan]Project name[/bold cyan]").strip()
-            if not project:
-                console.print("[dim]Project name cannot be empty. Try again.[/dim]")
-                continue
-            if project.startswith("/"):
-                # User typed a slash command at the name prompt — handle the common ones
-                cmd = project.lower()
-                if cmd in ("/help", "/h"):
-                    display.show_help()
-                elif cmd == "/list":
-                    projects = db.list_projects()
-                    if not projects:
-                        console.print("\n[dim]No projects yet.[/dim]")
-                    else:
-                        console.print("\n[bold]Saved Projects[/bold]\n")
-                        for p in projects:
-                            console.print(
-                                f"  [cyan]{p['name']}[/cyan]  "
-                                f"[dim]{p['message_count']} messages · last active {p['last_active']}[/dim]"
-                            )
-                        console.print()
-                else:
-                    console.print(
-                        f"[yellow]'{project}' is not a valid project name.[/yellow]  "
-                        "[dim]Enter a name like 'my-app' or 'restaurant-saas'.[/dim]"
-                    )
-                continue
-            break
+        project = _pick_project(db, display)
 
     project_dir = BASE_DIR / "projects" / project
     project_dir.mkdir(parents=True, exist_ok=True)   # always visible immediately
