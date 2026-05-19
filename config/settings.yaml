@@ -1,7 +1,5 @@
-model: sonnet
-max_tokens: 4096
-max_tool_iterations: 12
-max_history_messages: 10
+model: sonnet            # alias: haiku / sonnet / opus
+max_history_messages: 10 # conversation turns loaded when resuming a project
 
 team:
   default_roster:

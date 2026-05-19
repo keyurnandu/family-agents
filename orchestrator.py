@@ -209,10 +209,10 @@ class Orchestrator:
             )
         except Exception as e:
             console.print(f"[dim yellow]Routing fallback (JSON parse error): {e}[/dim yellow]")
-            # Default: route to all active roster agents
+            # Route to the full active team so no agents are silently dropped
             return {
-                "agents": self.active_roster[:2],
-                "tasks": {r: user_input for r in self.active_roster[:2]},
+                "agents": list(self.active_roster),
+                "tasks": {r: user_input for r in self.active_roster},
             }
 
     # ------------------------------------------------------------------
@@ -350,13 +350,15 @@ class Orchestrator:
         if final_response.strip():
             self.display.show_orchestrator_response(final_response)
 
-        # Persist to DB and memory
+        # Persist to DB and in-memory log
         combined = final_response or "\n\n".join(
             f"[{r}]: {resp}" for r, resp in agent_responses.items()
         )
         if combined:
             self.db.save_message(self.project_name, "assistant", combined)
             self.messages.append({"role": "assistant", "content": combined})
+        else:
+            console.print("[dim yellow]No response generated. Try rephrasing your message.[/dim yellow]")
 
         console.print()
 

@@ -86,7 +86,8 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         if bash_match:
             content = bash_match.group(1).strip()
             if content:
-                label = content.splitlines()[0][:80]
+                lines = content.splitlines()
+                label = (lines[0] if lines else "shell command")[:80]
                 actions.append(Action(kind="bash", label=label, content=content, agent_name=agent_name))
 
     return actions

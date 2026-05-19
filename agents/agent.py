@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -114,7 +115,6 @@ class Agent:
 
     def respond(self, task: str, context: str, history_text: str) -> str:
         """Generate a response, handling one round of peer consultation if needed."""
-        import re
         system_prompt = self._build_system_prompt()
 
         prompt_parts = []

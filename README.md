@@ -187,9 +187,8 @@ To add a brand new role:
 **`config/settings.yaml`**
 
 ```yaml
-model: sonnet                  # claude model alias: haiku / sonnet / opus
-max_tool_iterations: 12        # max agent consultations per user message
-max_history_messages: 10       # conversation turns loaded on resume
+model: sonnet            # alias: haiku / sonnet / opus
+max_history_messages: 10 # conversation turns loaded when resuming a project
 
 team:
   default_roster: [pm, bsa, developer, lead]
