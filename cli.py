@@ -86,8 +86,8 @@ def _pick_project(db, display) -> str:
                 sys.exit(0)
             else:
                 console.print(
-                    f"[yellow]Unknown command:[/yellow] {raw}  "
-                    "[dim]Available here: /help · /list · /quit[/dim]"
+                    f"[yellow]{raw}[/yellow] is only available once you're inside a project.  "
+                    "[dim]Select or create one first, then use /help to see all commands.[/dim]"
                 )
             continue
 
