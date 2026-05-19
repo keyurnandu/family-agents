@@ -131,6 +131,22 @@ You
             You
 ```
 
+### Phase-Aware Workflow
+
+For complex tasks Aria automatically organises work into **sequential phases**, so each team hands off to the next only when their work is done. Agents **within a phase run in parallel**.
+
+```
+Phase 1 — Requirements  (PM + BSA work in parallel)
+          │  output fed as context →
+Phase 2 — Implementation  (Developer + Lead work in parallel)
+          │  output fed as context →
+Phase 3 — QA  (Casey tests the implementation)
+          │  output fed as context →
+Phase 4 — DevOps  (Taylor deploys after QA passes)
+```
+
+Simple questions or discussions that don't need sequencing are handled in a single phase (everyone works in parallel immediately). Aria decides the right shape for every message.
+
 ### Memory
 
 Two layers of memory persist across sessions:

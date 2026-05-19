@@ -27,19 +27,44 @@ ROLE_DESCRIPTIONS = {
     "devops": "CI/CD pipelines, cloud infrastructure, deployments, monitoring",
 }
 
-# JSON schema the orchestrator uses to decide routing
+# JSON schema the orchestrator uses to decide routing.
+# Work is organised into sequential PHASES. Within each phase all agents
+# run in parallel. Each phase's combined output is passed as context to
+# the next phase, so Dev always receives completed requirements before
+# starting, and QA always receives completed implementation before testing.
 ROUTING_SCHEMA = {
     "type": "object",
     "properties": {
-        "agents": {
+        "phases": {
             "type": "array",
-            "items": {"type": "string"},
-            "description": "Roles to consult (only from active team)",
-        },
-        "tasks": {
-            "type": "object",
-            "additionalProperties": {"type": "string"},
-            "description": "Specific task string for each agent role",
+            "description": (
+                "Ordered list of work phases. Phases run one after another. "
+                "Agents inside a phase run in parallel. "
+                "Example: [{name:'Requirements', agents:['pm','bsa'], tasks:{...}}, "
+                "{name:'Implementation', agents:['developer','lead'], tasks:{...}}, "
+                "{name:'QA', agents:['qa'], tasks:{...}}]. "
+                "Use a single phase when the work does not need sequencing."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Short label for this phase, e.g. 'Requirements', 'Implementation', 'QA'",
+                    },
+                    "agents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Roles to run in parallel during this phase (active team only)",
+                    },
+                    "tasks": {
+                        "type": "object",
+                        "additionalProperties": {"type": "string"},
+                        "description": "Specific task for each agent in this phase",
+                    },
+                },
+                "required": ["name", "agents", "tasks"],
+            },
         },
         "memories": {
             "type": "array",
@@ -50,18 +75,14 @@ ROUTING_SCHEMA = {
                     "category": {
                         "type": "string",
                         "enum": [
-                            "decision",
-                            "requirement",
-                            "technical",
-                            "constraint",
-                            "assumption",
-                            "stakeholder",
+                            "decision", "requirement", "technical",
+                            "constraint", "assumption", "stakeholder",
                         ],
                     },
                 },
                 "required": ["content", "category"],
             },
-            "description": "Facts that must be persisted to project memory",
+            "description": "Facts to persist to project memory",
         },
         "team_changes": {
             "type": "array",
@@ -74,10 +95,10 @@ ROUTING_SCHEMA = {
                 },
                 "required": ["action", "role", "reason"],
             },
-            "description": "Add or remove agents based on project needs",
+            "description": "Add or remove agents from the active roster",
         },
     },
-    "required": ["agents", "tasks"],
+    "required": ["phases"],
 }
 
 
@@ -162,9 +183,20 @@ class Orchestrator:
             f"## Project Memory\n{project_memory or 'None yet.'}\n\n"
             f"## Active Team\n" + "\n".join(team_lines) + "\n\n"
             f"## Available to Add\n{', '.join(available) or 'All agents active.'}\n\n"
+            "## Routing Instructions\n"
+            "Organise work into sequential PHASES when tasks have dependencies:\n"
+            "  - Phase 1 (Requirements): pm + bsa gather requirements and write user stories\n"
+            "  - Phase 2 (Implementation): developer + lead implement once requirements are done\n"
+            "  - Phase 3 (QA): qa writes and runs tests once implementation is done\n"
+            "  - Phase 4 (DevOps): devops deploys once QA passes\n"
+            "Agents WITHIN a phase run in parallel. Each phase's output is fed as context "
+            "into the next phase, so Dev always receives completed requirements and QA "
+            "always receives completed implementation.\n"
+            "Use a SINGLE phase when work does not need sequencing "
+            "(e.g. simple questions, architectural discussions, research tasks).\n\n"
             "Return ONLY valid JSON matching the provided schema. "
             "Only include agents that are on the active team. "
-            "If the message is a simple clarification or greeting, agents list can be empty."
+            "If the message is a simple clarification or greeting, use an empty agents list."
         )
 
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
@@ -210,10 +242,15 @@ class Orchestrator:
             )
         except Exception as e:
             console.print(f"[dim yellow]Routing fallback (JSON parse error): {e}[/dim yellow]")
-            # Route to the full active team so no agents are silently dropped
+            # Route to the full active team in a single phase so nothing is silently dropped
             return {
-                "agents": list(self.active_roster),
-                "tasks": {r: user_input for r in self.active_roster},
+                "phases": [
+                    {
+                        "name": "General",
+                        "agents": list(self.active_roster),
+                        "tasks": {r: user_input for r in self.active_roster},
+                    }
+                ]
             }
 
     # ------------------------------------------------------------------
@@ -276,69 +313,104 @@ class Orchestrator:
                     mem.get("category", "note"), mem.get("content", "")
                 )
 
-        # Call agents — in parallel when there are multiple
-        agent_responses: dict[str, str] = {}
-        history_text = self._format_history()
-        agents_to_call = [r for r in routing.get("agents", []) if r in self.active_roster]
+        # ── Phase-aware execution ────────────────────────────────────────
+        # Phases run sequentially. Agents within each phase run in parallel.
+        # Each phase receives the previous phase's output as extra context.
+        # ─────────────────────────────────────────────────────────────────
+        phases: list[dict] = routing.get("phases", [])
+        all_agent_responses: dict[str, str] = {}   # accumulated across all phases
+        previous_phase_output: str = ""            # fed into the next phase as context
+        project_dir = self.base_dir / "projects" / self.project_name
+        project_dir.mkdir(parents=True, exist_ok=True)
 
-        def _call_one(role: str) -> tuple[str, str]:
+        def _call_one(role: str, task: str, ctx: str) -> tuple[str, str]:
             """Run one agent and return (role, response). Thread-safe."""
             agent = self.agents.get(role)
             if not agent:
                 return role, "(agent not found)"
-            task = routing.get("tasks", {}).get(role, user_input)
             return role, agent.respond(
                 task=task,
-                context=f"Customer said: {user_input}",
-                history_text=history_text,
+                context=ctx,
+                history_text=self._format_history(),
             )
 
-        if agents_to_call:
-            # Build a live status line listing every agent that is currently working
+        for phase_idx, phase in enumerate(phases):
+            phase_name = phase.get("name", f"Phase {phase_idx + 1}")
+            agents_to_call = [r for r in phase.get("agents", []) if r in self.active_roster]
+            if not agents_to_call:
+                continue
+
+            # Build context for this phase: customer message + anything from prior phases
+            phase_context = f"Customer said: {user_input}"
+            if previous_phase_output:
+                phase_context += f"\n\nOutput from previous phase:\n{previous_phase_output}"
+
+            # Status line showing which agents are working in this phase
             working = {r: personas.get(r, {}) for r in agents_to_call}
             status_parts = [
                 f"[{p.get('color','white')}]{p.get('emoji','')} {p.get('name', r)}[/{p.get('color','white')}]"
                 for r, p in working.items()
             ]
-            status_msg = "  ".join(status_parts) + "  [dim]working in parallel…[/dim]"
+            phase_label = f"[dim]({phase_name})[/dim]" if len(phases) > 1 else ""
+            status_msg = "  ".join(status_parts) + f"  [dim]working in parallel…[/dim]  {phase_label}"
 
+            phase_responses: dict[str, str] = {}
             try:
                 with console.status(status_msg, spinner="dots"):
                     with ThreadPoolExecutor(max_workers=len(agents_to_call)) as pool:
-                        futures = {pool.submit(_call_one, r): r for r in agents_to_call}
+                        task_map = phase.get("tasks", {})
+                        futures = {
+                            pool.submit(_call_one, r, task_map.get(r, user_input), phase_context): r
+                            for r in agents_to_call
+                        }
                         for future in as_completed(futures):
                             role, response = future.result()
-                            agent_responses[role] = response
+                            phase_responses[role] = response
             except KeyboardInterrupt:
                 console.print("\n[yellow]⚡ Interrupted — returning to prompt.[/yellow]")
                 console.print()
                 return
 
-        # Display results and handle actions (sequentially — needs user interaction)
-        project_dir = self.base_dir / "projects" / self.project_name
-        project_dir.mkdir(parents=True, exist_ok=True)
+            # Display this phase's results; handle permission-gated actions
+            for role, response in phase_responses.items():
+                p = personas.get(role, {})
+                name = p.get("name", role.upper())
+                color = p.get("color", "white")
+                emoji = p.get("emoji", "")
 
-        for role, response in agent_responses.items():
-            p = personas.get(role, {})
-            name = p.get("name", role.upper())
-            color = p.get("color", "white")
-            emoji = p.get("emoji", "")
+                self.display.show_agent_response(name, response, color, emoji)
 
-            self.display.show_agent_response(name, response, color, emoji)
+                # Permission-gated action execution
+                actions = parse_actions(response, name)
+                if actions:
+                    outcomes = prompt_and_execute(actions, project_dir)
+                    if outcomes:
+                        phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
-            # Permission-gated action execution
-            actions = parse_actions(response, name)
-            if actions:
-                outcomes = prompt_and_execute(actions, project_dir)
-                if outcomes:
-                    agent_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                # Auto-extract REMEMBER: markers
+                saved_count = self.memory.extract_and_save_memories(response, role)
+                if saved_count:
+                    console.print(
+                        f"[dim green]  (💾 {saved_count} memory item(s) from {name})[/dim green]"
+                    )
 
-            # Auto-extract REMEMBER: markers
-            saved_count = self.memory.extract_and_save_memories(response, role)
-            if saved_count:
+            all_agent_responses.update(phase_responses)
+
+            # Build context summary for the next phase from this phase's output
+            phase_summary_parts = []
+            for role, resp in phase_responses.items():
+                agent_name = personas.get(role, {}).get("name", role.upper())
+                phase_summary_parts.append(f"[{agent_name}]:\n{resp[:1200]}")
+            previous_phase_output = "\n\n".join(phase_summary_parts)
+
+            # Print a phase separator when there are multiple phases and more to come
+            if len(phases) > 1 and phase_idx < len(phases) - 1:
                 console.print(
-                    f"[dim green]  (💾 {saved_count} memory item(s) from {name})[/dim green]"
+                    f"\n[dim]── {phase_name} complete · handing off to next phase ──[/dim]\n"
                 )
+
+        # alias for synthesis block below
+        agent_responses = all_agent_responses
 
         # Synthesize if multiple agents responded; otherwise Aria speaks directly
         final_response = ""
