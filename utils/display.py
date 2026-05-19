@@ -141,6 +141,8 @@ class Display:
             "  [cyan]/history[/cyan]           Show recent conversation\n"
             "  [cyan]/clear[/cyan]             Clear context window (keeps memory)\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
+            "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"
+            "  [cyan]/new <name>[/cyan]        Create and switch to a brand new project\n"
             "  [cyan]/quit[/cyan]  [cyan]/exit[/cyan]       Exit\n\n"
             "[bold]Available Roles[/bold]\n"
             "  [green]pm[/green] · [yellow]bsa[/yellow] · [blue]developer[/blue] · [magenta]lead[/magenta] · "

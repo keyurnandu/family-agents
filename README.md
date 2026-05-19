@@ -119,6 +119,8 @@ You: build a login page with HTML, CSS, and JS
 | `/memory` | View everything saved to project memory |
 | `/history` | Show recent conversation turns |
 | `/project` | Show project stats (messages, memory items, model) |
+| `/switch [name]` | Switch to another project (shows picker if no name given) |
+| `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
 | `/help` | Show full help |
 | `/quit` | Exit |

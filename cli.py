@@ -29,23 +29,28 @@ def _check_cli():
         sys.exit(1)
 
 
-def _show_startup_hint(saved: list, config: dict, display) -> None:
-    """Print saved project list and a one-line usage hint."""
+def _show_project_list(saved: list) -> None:
+    """Print the numbered project table."""
+    table = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
+    table.add_column("Num", style="bold cyan", no_wrap=True)
+    table.add_column("Name", style="bold white", no_wrap=True)
+    table.add_column("Info", style="dim")
+    for i, p in enumerate(saved, 1):
+        table.add_row(
+            str(i),
+            p["name"],
+            f"{p['message_count']} msgs · {p['last_active']}",
+        )
+    console.print()
+    console.rule("[bold]Your Projects[/bold]", style="cyan")
+    console.print(table)
+    console.rule(style="dim")
+
+
+def _show_startup_hint(saved: list) -> None:
+    """Print project list (if any) and a one-line usage hint."""
     if saved:
-        table = Table(show_header=False, box=None, padding=(0, 2, 0, 0))
-        table.add_column("Num", style="bold cyan", no_wrap=True)
-        table.add_column("Name", style="bold white", no_wrap=True)
-        table.add_column("Info", style="dim")
-        for i, p in enumerate(saved, 1):
-            table.add_row(
-                str(i),
-                p["name"],
-                f"{p['message_count']} msgs · {p['last_active']}",
-            )
-        console.print()
-        console.rule("[bold]Your Projects[/bold]", style="cyan")
-        console.print(table)
-        console.rule(style="dim")
+        _show_project_list(saved)
         console.print(
             "\n[dim]Type a [bold]number[/bold] to resume, a [bold]name[/bold] to start new, "
             "or [bold]/help[/bold] for commands.[/dim]\n"
@@ -57,28 +62,75 @@ def _show_startup_hint(saved: list, config: dict, display) -> None:
         )
 
 
-def _handle_pre_project_command(cmd: str, raw: str, saved: list, config: dict, display) -> None:
-    """Handle slash commands typed before a project is open. Returns None always."""
+def _open_project(name: str, db, display, model, force_new: bool = False):
+    """
+    Initialise a project by name and return a ready Orchestrator.
+    Prints resume/new status. Creates the project folder.
+    If force_new=True, treats it as a new project even if name exists in DB.
+    """
+    from orchestrator import Orchestrator
+
+    project_dir = BASE_DIR / "projects" / name
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    existing = db.get_project(name)
+    if existing and not force_new:
+        console.print(
+            f"\n[green]Resuming:[/green] [bold]{name}[/bold]  "
+            f"[dim]({existing['message_count']} messages in history)[/dim]"
+        )
+    else:
+        if force_new and existing:
+            console.print(
+                f"\n[yellow]A project named [bold]{name}[/bold] already exists — resuming it.[/yellow]"
+            )
+        else:
+            console.print(f"\n[green]Starting new project:[/green] [bold]{name}[/bold]")
+        db.ensure_project(name)
+
+    console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
+
+    return Orchestrator(
+        project_name=name,
+        base_dir=BASE_DIR,
+        db=db,
+        display=display,
+        model_override=model,
+    )
+
+
+def _pick_from_list(raw: str, saved: list) -> str | None:
+    """
+    If raw is a valid number selecting from saved, return that project name.
+    Otherwise return None.
+    """
+    if raw.isdigit():
+        idx = int(raw) - 1
+        if 0 <= idx < len(saved):
+            return saved[idx]["name"]
+        console.print(
+            f"[yellow]No project at position {raw}.[/yellow]  "
+            f"[dim]Choose 1–{len(saved)} or type a name.[/dim]"
+        )
+        return None  # signal: bad number, re-prompt
+    return raw  # not a number — treat as project name
+
+
+def _handle_pre_project_command(raw: str, saved: list, config: dict, display) -> None:
+    """Slash commands available before any project is open."""
+    cmd = raw.lower()
     if cmd in ("/help", "/h"):
         display.show_help()
     elif cmd in ("/team", "/roster"):
-        default_roster = config["team"]["default_roster"]
-        available = config["team"]["available_agents"]
         console.print("\n[dim]Default team — use /add <role> inside a project to adjust.[/dim]")
-        display.show_team(default_roster, config["agent_personas"])
-        console.print(
-            f"[dim]Also available: {', '.join(available)}[/dim]\n"
-        )
+        display.show_team(config["team"]["default_roster"], config["agent_personas"])
+        available = config["team"]["available_agents"]
+        console.print(f"[dim]Also available: {', '.join(available)}[/dim]\n")
     elif cmd == "/list":
         if not saved:
             console.print("\n[dim]No projects yet.[/dim]\n")
         else:
-            console.print()
-            for i, p in enumerate(saved, 1):
-                console.print(
-                    f"  [cyan]{i}.[/cyan] [bold]{p['name']}[/bold]  "
-                    f"[dim]{p['message_count']} msgs · {p['last_active']}[/dim]"
-                )
+            _show_project_list(saved)
             console.print()
     elif cmd in ("/quit", "/exit", "/q"):
         console.print("[dim]Goodbye![/dim]")
@@ -104,7 +156,6 @@ def main(project: str | None, list_projects: bool, model: str | None):
     """
     _check_cli()
 
-    from orchestrator import Orchestrator
     from utils.db_manager import DBManager
     from utils.display import Display
 
@@ -120,12 +171,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
         if not saved:
             console.print("\n[dim]No projects found. Start one with:[/dim]  python cli.py\n")
         else:
-            console.print("\n[bold]Saved Projects[/bold]\n")
-            for p in saved:
-                console.print(
-                    f"  [cyan]{p['name']}[/cyan]  "
-                    f"[dim]{p['message_count']} messages · last active {p['last_active']}[/dim]"
-                )
+            _show_project_list(saved)
             console.print()
         return
 
@@ -133,35 +179,15 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
     orchestrator = None
 
-    # ── python cli.py --project <name>: skip the picker entirely ──────
+    # ── python cli.py --project <name>: skip straight in ─────────────
     if project:
-        project_dir = BASE_DIR / "projects" / project
-        project_dir.mkdir(parents=True, exist_ok=True)
-        existing = db.get_project(project)
-        if existing:
-            console.print(
-                f"\n[green]Resuming:[/green] [bold]{project}[/bold]  "
-                f"[dim]({existing['message_count']} messages in history)[/dim]"
-            )
-        else:
-            console.print(f"\n[green]Starting new project:[/green] [bold]{project}[/bold]")
-            db.ensure_project(project)
-        console.print(f"[dim]Project files will be written to:[/dim] [cyan]{project_dir}[/cyan]")
-        orchestrator = Orchestrator(
-            project_name=project,
-            base_dir=BASE_DIR,
-            db=db,
-            display=display,
-            model_override=model,
-        )
+        orchestrator = _open_project(project, db, display, model)
         console.print(
-            "\n[dim]Describe your project or ask the team anything. "
+            "[dim]Describe your project or ask the team anything. "
             "Type [bold]/help[/bold] for commands.[/dim]\n"
         )
-
-    # ── No --project flag: show hint and let user pick via You: prompt ─
     else:
-        _show_startup_hint(db.list_projects(), config, display)
+        _show_startup_hint(db.list_projects())
 
     # ── Main REPL loop ────────────────────────────────────────────────
     while True:
@@ -174,82 +200,114 @@ def main(project: str | None, list_projects: bool, model: str | None):
         if not user_input:
             continue
 
-        # ── Project not yet open: resolve it from this input ──────────
+        # ── No project open yet: resolve from this input ──────────────
         if orchestrator is None:
             saved = db.list_projects()
 
-            # Slash command before a project is chosen
             if user_input.startswith("/"):
-                _handle_pre_project_command(
-                    user_input.lower(), user_input, saved, config, display
-                )
+                _handle_pre_project_command(user_input, saved, config, display)
                 continue
 
-            # Numeric selection
-            if user_input.isdigit():
-                idx = int(user_input) - 1
-                if 0 <= idx < len(saved):
-                    project = saved[idx]["name"]
-                else:
-                    console.print(
-                        f"[yellow]No project at position {user_input}.[/yellow]  "
-                        f"[dim]Choose 1–{len(saved)} or type a name.[/dim]"
-                    )
-                    continue
-            else:
-                # Reject names with slashes
-                if "/" in user_input or "\\" in user_input:
-                    console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
-                    continue
-                project = user_input
+            if "/" in user_input or "\\" in user_input:
+                console.print("[yellow]Project name can't contain slashes. Try again.[/yellow]")
+                continue
 
-            # Initialise the project and orchestrator
-            project_dir = BASE_DIR / "projects" / project
-            project_dir.mkdir(parents=True, exist_ok=True)
-            existing = db.get_project(project)
-            if existing:
-                console.print(
-                    f"\n[green]Resuming:[/green] [bold]{project}[/bold]  "
-                    f"[dim]({existing['message_count']} messages in history)[/dim]"
-                )
-            else:
-                console.print(f"\n[green]Starting new project:[/green] [bold]{project}[/bold]")
-                db.ensure_project(project)
-            console.print(
-                f"[dim]Project files will be written to:[/dim] [cyan]{project_dir}[/cyan]\n"
-            )
-            orchestrator = Orchestrator(
-                project_name=project,
-                base_dir=BASE_DIR,
-                db=db,
-                display=display,
-                model_override=model,
-            )
+            name = _pick_from_list(user_input, saved)
+            if name is None:
+                continue  # bad number — already printed error
+
+            project = name
+            orchestrator = _open_project(project, db, display, model)
             continue
 
-        # ── Inside a project: normal slash commands ───────────────────
+        # ── Inside a project: slash commands ─────────────────────────
         if user_input.startswith("/"):
             cmd = user_input.lower()
+            parts = cmd.split(None, 1)  # ["/switch", "name"] or ["/switch"]
 
             if cmd in ("/quit", "/exit", "/q"):
                 console.print("[dim]Session saved. Goodbye![/dim]")
                 break
+
             elif cmd == "/help":
                 display.show_help()
+
             elif cmd == "/team":
                 orchestrator.show_team()
+
             elif cmd.startswith("/add "):
-                orchestrator.add_agent(cmd.split(" ", 1)[1].strip())
+                orchestrator.add_agent(parts[1] if len(parts) > 1 else "")
+
             elif cmd.startswith("/remove "):
-                orchestrator.remove_agent(cmd.split(" ", 1)[1].strip())
+                orchestrator.remove_agent(parts[1] if len(parts) > 1 else "")
+
             elif cmd == "/memory":
                 orchestrator.show_memory()
+
             elif cmd == "/history":
                 orchestrator.show_history()
+
             elif cmd == "/project":
                 orchestrator.show_project_info()
+
             elif cmd == "/clear":
                 orchestrator.clear_context()
+
+            # ── /switch [name|number] ─────────────────────────────────
+            elif parts[0] == "/switch":
+                saved = db.list_projects()
+
+                if len(parts) > 1:
+                    # Direct: /switch my-app  or  /switch 2
+                    arg = parts[1].strip()
+                    name = _pick_from_list(arg, saved)
+                    if name is None:
+                        continue
+                else:
+                    # No arg — show list and prompt inline
+                    if saved:
+                        _show_project_list(saved)
+                        console.print(
+                            "\n[dim]Type a number or project name (or press Enter to stay here):[/dim]"
+                        )
+                    else:
+                        console.print("[dim]No other projects yet. Type a name to create one:[/dim]")
+                    try:
+                        arg = Prompt.ask("[bold cyan]Switch to[/bold cyan]").strip()
+                    except (KeyboardInterrupt, EOFError):
+                        console.print("\n[dim]Staying in current project.[/dim]")
+                        continue
+                    if not arg:
+                        console.print("[dim]Staying in current project.[/dim]")
+                        continue
+                    name = _pick_from_list(arg, saved)
+                    if name is None:
+                        continue
+
+                if name == project:
+                    console.print(f"[dim]Already in [bold]{project}[/bold].[/dim]")
+                    continue
+
+                console.print(f"\n[dim]Leaving [bold]{project}[/bold] — session saved.[/dim]")
+                project = name
+                orchestrator = _open_project(project, db, display, model)
+
+            # ── /new <name> ───────────────────────────────────────────
+            elif parts[0] == "/new":
+                if len(parts) < 2 or not parts[1].strip():
+                    console.print(
+                        "[yellow]Usage:[/yellow] /new <project-name>  "
+                        "[dim]e.g. /new restaurant-saas[/dim]"
+                    )
+                    continue
+                name = parts[1].strip()
+                if "/" in name or "\\" in name:
+                    console.print("[yellow]Project name can't contain slashes.[/yellow]")
+                    continue
+                console.print(f"\n[dim]Leaving [bold]{project}[/bold] — session saved.[/dim]")
+                project = name
+                orchestrator = _open_project(project, db, display, model, force_new=True)
+
             else:
                 console.print(
                     f"[yellow]Unknown command:[/yellow] {user_input}  "
