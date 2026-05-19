@@ -1,0 +1,49 @@
+model: claude-sonnet-4-6
+max_tokens: 4096
+max_tool_iterations: 12
+max_history_messages: 10
+
+team:
+  default_roster:
+    - pm
+    - bsa
+    - developer
+    - lead
+  available_agents:
+    - researcher
+    - qa
+    - devops
+
+agent_personas:
+  orchestrator:
+    name: "Aria"
+    emoji: "🎯"
+    color: "bright_cyan"
+  pm:
+    name: "Alex"
+    emoji: "📋"
+    color: "green"
+  bsa:
+    name: "Morgan"
+    emoji: "🔍"
+    color: "yellow"
+  developer:
+    name: "Sam"
+    emoji: "💻"
+    color: "blue"
+  lead:
+    name: "Jordan"
+    emoji: "⚡"
+    color: "magenta"
+  researcher:
+    name: "Riley"
+    emoji: "🔬"
+    color: "cyan"
+  qa:
+    name: "Casey"
+    emoji: "✅"
+    color: "bright_green"
+  devops:
+    name: "Taylor"
+    emoji: "🚀"
+    color: "bright_yellow"
