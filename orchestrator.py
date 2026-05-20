@@ -892,6 +892,12 @@ class Orchestrator:
         project_dir = self.base_dir / "projects" / self.project_name
         project_dir.mkdir(parents=True, exist_ok=True)
 
+        import threading
+        # Shared file cache + lock — populated lazily per phase.
+        # All agents in the same phase share this so each file is read from disk once.
+        phase_file_cache: dict = {}
+        phase_file_lock = threading.Lock()
+
         def _call_one(role: str, task: str, ctx: str) -> tuple[str, str]:
             """Run one agent and return (role, response). Thread-safe."""
             agent = self.agents.get(role)
@@ -900,10 +906,13 @@ class Orchestrator:
             return role, agent.respond(
                 task=task,
                 context=ctx,
-                history_text=self._format_history(limit=3),  # agents need less history
+                history_text=self._format_history(limit=3),
+                shared_file_cache=phase_file_cache,
+                shared_file_lock=phase_file_lock,
             )
 
         for phase_idx, phase in enumerate(phases):
+            phase_file_cache.clear()   # fresh cache per phase — don't share stale reads
             phase_name = phase.get("name", f"Phase {phase_idx + 1}")
             agents_to_call = [r for r in phase.get("agents", []) if r in self.active_roster]
             if not agents_to_call:

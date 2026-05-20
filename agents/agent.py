@@ -222,8 +222,20 @@ class Agent:
         except Exception as e:
             return f"(peer consultation failed: {e})"
 
-    def respond(self, task: str, context: str, history_text: str) -> str:
-        """Generate a response, handling one round of peer consultation if needed."""
+    def respond(
+        self,
+        task: str,
+        context: str,
+        history_text: str,
+        shared_file_cache: dict | None = None,
+        shared_file_lock=None,
+    ) -> str:
+        """Generate a response, handling one round of peer consultation if needed.
+
+        shared_file_cache / shared_file_lock: when multiple agents run in parallel
+        in the same phase, pass the same dict + Lock so each file is read from disk
+        only once regardless of how many agents request it.
+        """
         system_prompt = self._build_system_prompt(task=task)
 
         prompt_parts = []
@@ -259,12 +271,21 @@ class Agent:
 
                 for req in read_requests[:5]:  # cap at 5 files per response
                     req_clean = req.strip()
+
+                    # 1. Check within-turn dedup cache (this agent)
                     if req_clean in _disk_cache:
                         file_contents[req_clean] = _disk_cache[req_clean]
                         continue
+
+                    # 2. Check cross-agent shared cache (same phase, different agent already read it)
+                    if shared_file_cache is not None and req_clean in shared_file_cache:
+                        file_contents[req_clean] = shared_file_cache[req_clean]
+                        _disk_cache[req_clean] = shared_file_cache[req_clean]
+                        continue
+
                     raw = None
 
-                    # 1. Check project docs/files first (requirements, sprint plans, etc.)
+                    # 3. Check project docs/files first (requirements, sprint plans, etc.)
                     candidate = (project_docs_dir / req_clean).resolve()
                     try:
                         candidate.relative_to(project_docs_dir)
@@ -273,7 +294,7 @@ class Agent:
                     except (ValueError, Exception):
                         pass
 
-                    # 2. Fall back to loaded codebase
+                    # 4. Fall back to loaded codebase
                     if raw is None and loaded_path:
                         try:
                             fpath = (loaded_path / req_clean).resolve()
@@ -284,16 +305,22 @@ class Agent:
                             pass
 
                     if raw is not None:
-                        if READ_FILE_LIMIT and len(raw) > READ_FILE_LIMIT:
-                            file_contents[req_clean] = (
-                                raw[:READ_FILE_LIMIT]
-                                + f"\n\n[File truncated — {len(raw):,} chars total. "
-                                "Say 'show full <filename>' for the complete file.]"
-                            )
-                        else:
-                            file_contents[req_clean] = raw
-                        if raw is not None:
-                            _disk_cache[req_clean] = file_contents.get(req_clean, raw)
+                        stored = (
+                            raw[:READ_FILE_LIMIT]
+                            + f"\n\n[File truncated — {len(raw):,} chars total. "
+                            "Say 'show full <filename>' for the complete file.]"
+                            if READ_FILE_LIMIT and len(raw) > READ_FILE_LIMIT
+                            else raw
+                        )
+                        file_contents[req_clean] = stored
+                        _disk_cache[req_clean] = stored
+                        # Populate shared cache so other parallel agents skip the disk read
+                        if shared_file_cache is not None:
+                            if shared_file_lock:
+                                with shared_file_lock:
+                                    shared_file_cache.setdefault(req_clean, stored)
+                            else:
+                                shared_file_cache.setdefault(req_clean, stored)
                 if file_contents:
                     file_ctx = "\n\n".join(
                         f"### {fname}\n```\n{content}\n```"
