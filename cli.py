@@ -311,15 +311,33 @@ def main(project: str | None, list_projects: bool, model: str | None):
             # Slash commands
             if user_input.startswith("/"):
                 cmd_lower = user_input.lower()
-                # /load, /unload, /edit-mode work without a named project —
-                # silently open general chat and fall through to the handler below
-                if (
-                    cmd_lower.startswith("/load")
-                    or cmd_lower == "/unload"
-                ):
+                parts_pre = user_input.split(None, 1)
+
+                if cmd_lower.startswith("/load"):
+                    # Derive project name from the folder being loaded so each
+                    # codebase gets its own isolated memory, history, and docs.
+                    path_arg = parts_pre[1].strip() if len(parts_pre) > 1 else ""
+                    if path_arg:
+                        from pathlib import Path as _Path
+                        folder_name = _Path(path_arg).name or GENERAL
+                        # Sanitize: strip characters not safe for a project name
+                        import re as _re
+                        folder_name = _re.sub(r"[^\w\-]", "-", folder_name).strip("-") or GENERAL
+                        current_project = folder_name
+                        console.print(
+                            f"[dim]📂 Opening project [bold]{folder_name}[/bold] "
+                            f"for {path_arg}[/dim]"
+                        )
+                    else:
+                        current_project = GENERAL
+                    orchestrator = _open_project(current_project, db, display, model)
+                    # fall through to the in-session command handler below
+
+                elif cmd_lower == "/unload":
                     current_project = GENERAL
                     orchestrator = _open_project(GENERAL, db, display, model)
                     # fall through to the in-session command handler below
+
                 else:
                     _handle_pre_project_command(user_input, saved, config, display)
                     continue
