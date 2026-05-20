@@ -119,6 +119,14 @@ You: @sam what are your capabilities?
 ```
 Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch` to move into a project anytime.
 
+**Switch model mid-session** — no need to restart:
+```
+/model haiku    # switch to faster/cheaper for simple questions
+/model opus     # switch to most powerful for deep analysis
+/model sonnet   # back to default
+/model          # show what's currently active
+```
+
 **Ctrl+C** — interrupt any running agent and return to the prompt immediately.
 
 ---
@@ -232,6 +240,8 @@ Skills show up in `/team` as a count next to each agent so you always know what 
 Point the team at any existing project on your machine — they'll scan it, understand the structure, and help you review, extend, or refactor it.
 
 ### Load a codebase
+
+`/load` works anywhere — before or after opening a project. If no project is open it silently starts a general chat session.
 
 ```bash
 /load C:\projects\my-app
@@ -512,6 +522,7 @@ Use `/status` for a full breakdown with a visual bar.
 ```yaml
 model: sonnet            # alias: haiku / sonnet / opus
 max_history_messages: 10 # conversation turns loaded when resuming a project
+max_memory_entries: 40   # max memory entries injected into agent prompts (full history kept on disk)
 
 team:
   default_roster: [pm, bsa, developer, lead]
