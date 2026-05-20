@@ -180,7 +180,26 @@ You: write a technical spec
 /export deployment-plan
 ```
 
-Each document is written by the most relevant agent (BSA for requirements, Lead for architecture, PM for sprint plans, etc.), saved as `docs/<type>-<date>.md`, and a preview is shown in the terminal.
+Each document is written by the most relevant agent (BSA for requirements, Lead for architecture, PM for sprint plans, etc.), saved as `docs/<type>-<date>.md`, and a confirmation is shown with the path and suggested next steps:
+
+```
+✓ Document created: projects/my-app/docs/requirements-doc-2026-05-20.md  42 lines · 3,210 chars
+  Read it: show requirements-doc-2026-05-20.md
+  Next:    start sprint planning or implementation
+```
+
+### Guided workflow — Aria always suggests what's next
+
+After every team response, Aria closes with a **What would you like to do next?** section offering 2–3 concrete options based on where the project is:
+
+```
+What would you like to do next?
+• Start implementation — Sam and Jordan can begin coding the core mechanics
+• Refine the requirements — add more detail to any epic before building
+• Generate a sprint plan — break the work into sprints and assign stories
+```
+
+This keeps the conversation moving without you having to guess what's possible.
 
 ### Picking up where you left off
 

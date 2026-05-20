@@ -500,7 +500,12 @@ class Orchestrator:
             "\nAs Aria, the coordinator, synthesize these into a clear, unified response "
             "for the customer. Be concise. Credit team members where relevant. "
             "If agents have file changes queued, tell the customer they will be prompted to approve them. "
-            "If there are open questions for the customer, group them at the end."
+            "If there are open questions for the customer, group them at the end.\n\n"
+            "IMPORTANT: Always close your response with a brief **What would you like to do next?** "
+            "section offering 2–3 concrete options tailored to where the project is now "
+            "(e.g. move to implementation, refine requirements, write a test plan, review the code, deploy, etc.). "
+            "Keep each option to one short line. This keeps the team moving forward without the customer "
+            "having to guess what's possible."
         )
         return "\n".join(parts)
 
@@ -1083,7 +1088,9 @@ class Orchestrator:
                     final_response = call_claude(
                         prompt=(
                             f"{self._format_history()}\n\nCustomer: {user_input}\n\n"
-                            "Respond as Aria, the project coordinator."
+                            "Respond as Aria, the project coordinator. "
+                            "End with a brief 'What would you like to do next?' "
+                            "offering 2–3 concrete next steps."
                         ),
                         system_prompt=self._synthesis_system_prompt(),
                         model=self.model,
@@ -1426,11 +1433,29 @@ class Orchestrator:
         out_path = docs_dir / filename
         out_path.write_text(content, encoding="utf-8")
 
-        # Display preview
-        self.display.show_agent_response(agent_name, content[:800] + ("\n\n[dim]…[/dim]" if len(content) > 800 else ""), p.get("color", "white"), p.get("emoji", ""))
+        # Show a clean confirmation — no truncated preview spam.
+        # The full doc is on disk; the user can 'show <filename>' to read it.
+        _NEXT_HINTS = {
+            "requirements":    "start sprint planning or implementation",
+            "requirements-doc":"start sprint planning or implementation",
+            "user-stories":    "start implementation or review the stories",
+            "sprint-plan":     "work on epics, assign stories, or start implementation",
+            "architecture":    "write a technical spec or start implementation",
+            "architecture-doc":"write a technical spec or start implementation",
+            "technical-spec":  "start implementation",
+            "tech-spec":       "start implementation",
+            "api-docs":        "start implementation or write a test plan",
+            "test-plan":       "run tests or review test coverage",
+            "deployment-plan": "deploy the application",
+        }
+        hint = _NEXT_HINTS.get(doc_type.lower(), "continue planning or start the next phase")
         console.print(
-            f"\n[green]✓ Saved:[/green] [cyan]projects/{self.project_name}/docs/{filename}[/cyan]\n"
+            f"\n[bold green]✓ Document created:[/bold green] "
+            f"[cyan]projects/{self.project_name}/docs/{filename}[/cyan]  "
+            f"[dim]{len(content.splitlines())} lines · {len(content):,} chars[/dim]"
         )
+        console.print(f"[dim]  Read it: show {filename}[/dim]")
+        console.print(f"[dim]  Next:    {hint}[/dim]\n")
 
         # Save a compact summary to memory so future sessions know what's defined
         try:
