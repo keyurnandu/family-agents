@@ -386,9 +386,12 @@ class Orchestrator:
             "- If docs already cover requirements, skip the requirements phase.\n"
             "- For greetings or simple clarifications, return an empty agents list.\n"
             "- If the customer asks about sprint details, epics, stories, requirements, or any "
-            "document — route to the relevant specialist (bsa for requirements/stories, "
-            "pm for sprints/plans, lead for architecture). Never return empty agents for "
-            "document questions, even if they sound simple.\n\n"
+            "document — route to ONE specialist only (bsa for requirements/stories/epics, "
+            "pm for sprints/plans/roadmaps, lead for architecture). Never return empty agents "
+            "for document questions, and never assign more than one agent to a simple read request.\n"
+            "- 'Read', 'show', 'tell me about', 'what's in', 'summarise' = ONE agent. "
+            "Only use multiple agents when the customer asks for analysis, implementation, "
+            "or cross-domain work.\n\n"
             "Return ONLY valid JSON. No explanation, no markdown."
         )
 
@@ -623,40 +626,69 @@ class Orchestrator:
 
     def _try_serve_file_directly(self, user_input: str) -> bool:
         """
-        If the message is a simple 'read/show <filename>' request and the file
-        can be found in the loaded codebase or project docs, display it instantly
-        without any LLM calls and return True. Otherwise return False.
+        Serve a file instantly from disk (zero LLM calls) when the message is a
+        simple read request. Two matching strategies:
+
+        1. Exact path match — message contains a filename with an extension
+           e.g. 'show config.py', 'read sprint-plan-2026-05-20.md'
+
+        2. Fuzzy doc match — message contains read intent + keywords that match
+           a filename in the project docs folder, even without an extension
+           e.g. 'read the sprint details' → matches sprint-plan-*.md
+                'show epics and stories'  → matches epics-and-user-stories-*.md
         """
         if not _FILE_READ_INTENT_RE.search(user_input):
             return False
-        path_match = _FILE_PATH_IN_MSG_RE.search(user_input)
-        if not path_match:
-            return False
 
-        candidate = path_match.group(1).strip().strip("`'\"")
         want_full = bool(_FULL_FILE_RE.search(user_input))
-
-        # Search order: project docs dir → loaded codebase
-        search_roots = []
         docs_dir = self.base_dir / "projects" / self.project_name / "docs"
-        if docs_dir.exists():
-            search_roots.append(docs_dir)
-        if self.loaded_path:
-            search_roots.append(self.loaded_path)
 
         resolved = None
-        for root in search_roots:
-            try:
-                fpath = (root / candidate).resolve()
-                fpath.relative_to(root.resolve())  # safety: must stay inside root
-                if fpath.exists() and fpath.is_file():
-                    resolved = fpath
-                    break
-            except (ValueError, Exception):
-                pass
+
+        # ── Strategy 1: exact path/filename with extension ────────────
+        path_match = _FILE_PATH_IN_MSG_RE.search(user_input)
+        if path_match:
+            candidate = path_match.group(1).strip().strip("`'\"")
+            search_roots = []
+            if docs_dir.exists():
+                search_roots.append(docs_dir)
+            if self.loaded_path:
+                search_roots.append(self.loaded_path)
+            for root in search_roots:
+                try:
+                    fpath = (root / candidate).resolve()
+                    fpath.relative_to(root.resolve())
+                    if fpath.exists() and fpath.is_file():
+                        resolved = fpath
+                        break
+                except (ValueError, Exception):
+                    pass
+
+        # ── Strategy 2: fuzzy keyword match against docs folder ───────
+        if resolved is None and docs_dir.exists():
+            # Extract meaningful words from the message (3+ chars, not stopwords)
+            _STOPWORDS = {"the", "can", "you", "read", "show", "get", "give", "me",
+                          "our", "and", "for", "with", "all", "any", "its", "tell",
+                          "about", "details", "please", "just", "full", "entire"}
+            words = [
+                w.lower() for w in re.findall(r"[a-zA-Z]{3,}", user_input)
+                if w.lower() not in _STOPWORDS
+            ]
+            if words:
+                doc_files = sorted(
+                    docs_dir.glob("*.md"),
+                    key=lambda f: f.stat().st_mtime,
+                    reverse=True,
+                )
+                for doc_file in doc_files:
+                    stem = doc_file.stem.lower()
+                    # Match if ANY search word appears in the filename stem
+                    if any(w in stem for w in words):
+                        resolved = doc_file
+                        break
 
         if resolved is None:
-            return False  # file not found — fall through to normal LLM routing
+            return False  # fall through to normal LLM routing
 
         # Read content — full if user asked for it, else cap at 20 000 chars
         try:
