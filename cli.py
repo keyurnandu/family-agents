@@ -159,12 +159,12 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
         if cb_path.exists() and cb_path.is_dir():
             try:
                 answer = Prompt.ask(
-                    f"[dim]Last session had [cyan]{saved_cb}[/cyan] loaded — reload it?[/dim] [y/N]",
-                    default="n",
+                    f"[dim]Last session had [cyan]{saved_cb}[/cyan] loaded — reload it?[/dim] [Y/n]",
+                    default="y",
                 ).strip().lower()
             except (KeyboardInterrupt, EOFError):
-                answer = "n"
-            if answer == "y":
+                answer = "y"
+            if answer in ("y", "yes", ""):
                 orch.load_codebase(saved_cb)
             else:
                 console.print("[dim]Skipped — use /load to reload anytime.[/dim]\n")

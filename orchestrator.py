@@ -860,6 +860,33 @@ class Orchestrator:
             self.show_status()
             return
 
+        # Pre-routing guard: if the task needs codebase access and nothing is loaded,
+        # tell the user immediately — don't route to agents who will all fail and
+        # produce a confusing synthesized error.
+        _CODEBASE_INTENT_RE = re.compile(
+            r"\b(?:review|read|show|open|check|audit|inspect|analyse|analyze|"
+            r"implement|write|fix|refactor|update|modify|change|edit|"
+            r"work\s+on|look\s+at|go\s+through|epic|story|sprint|feature|"
+            r"file|files|code|codebase|class|function|method|module|"
+            r"endpoint|api|service|controller|model|schema)\b",
+            re.IGNORECASE,
+        )
+        if not self.loaded_path and _CODEBASE_INTENT_RE.search(user_input):
+            saved_cb = self.memory.load_loaded_path()
+            if saved_cb:
+                console.print(
+                    f"\n[yellow]No codebase loaded this session.[/yellow] "
+                    f"Last session used [cyan]{saved_cb}[/cyan].\n"
+                    f"Run [bold cyan]/load {saved_cb}[/bold cyan] to reload it, then try again.\n"
+                )
+            else:
+                console.print(
+                    "\n[yellow]No codebase loaded.[/yellow] "
+                    "Run [bold cyan]/load <path-to-your-project>[/bold cyan] "
+                    "to point the team at your code.\n"
+                )
+            return
+
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
             routing = self._get_routing(user_input)
