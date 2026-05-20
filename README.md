@@ -534,6 +534,19 @@ Use `/status` for a full breakdown with a visual bar.
 3. **Project memory growth** — by default agents only see the last 40 memory entries (full history stays on disk). Tune with `max_memory_entries` in `config/settings.yaml`.
 4. **Long conversation history** — tune `max_history_messages` in `config/settings.yaml` (default: 10).
 
+### Routing speed
+
+Aria's routing decision runs on `routing_model` (default: `haiku`) — a separate, faster model from the one agents use. This makes the "Aria is routing…" step noticeably quicker without sacrificing response quality.
+
+Two config knobs control routing overhead:
+
+| Setting | Default | Effect |
+|---|---|---|
+| `routing_model` | `haiku` | Model for Aria's routing call — haiku is ~3× faster than sonnet |
+| `max_routing_memory` | `8` | Memory entries sent to routing — lower = smaller prompt = faster |
+
+Routing also uses a stripped-down system prompt: no full document content (just titles), no role definitions, no codebase tree — only what Aria needs to decide *who* to ask.
+
 ---
 
 ## Configuration
@@ -542,8 +555,10 @@ Use `/status` for a full breakdown with a visual bar.
 
 ```yaml
 model: sonnet            # alias: haiku / sonnet / opus
+routing_model: haiku     # model used for Aria's routing decision — haiku is faster and sufficient
 max_history_messages: 10 # conversation turns loaded when resuming a project
 max_memory_entries: 40   # max memory entries injected into agent prompts (full history kept on disk)
+max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)
 
 team:
   default_roster: [pm, bsa, developer, lead]

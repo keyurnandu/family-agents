@@ -333,11 +333,17 @@ class Orchestrator:
         return "\n".join(lines)
 
     def _routing_system_prompt(self) -> str:
-        role_memory = self.memory.load_role_memory("orchestrator")
-        project_memory = self.memory.load_project_memory(
-            limit=self.config.get("max_memory_entries", 40)
-        )
-        project_docs = self.memory.load_project_docs()
+        """
+        Lightweight system prompt for Aria's routing call.
+        Deliberately trimmed — routing is classification, not reasoning.
+        Full context (memory, docs) is injected into specialist agents separately.
+        """
+        # Only pass a small slice of memory for routing context
+        routing_mem_limit = self.config.get("max_routing_memory", 8)
+        project_memory = self.memory.load_project_memory(limit=routing_mem_limit)
+
+        # For docs: titles + one-line summaries only — not full content
+        doc_index = self._routing_doc_index()
 
         team_lines = [
             f"- {role} ({self.config['agent_personas'].get(role, {}).get('name', role)}): "
@@ -345,34 +351,50 @@ class Orchestrator:
             for role in self.active_roster
         ]
         available = [
-            r
-            for r in self.config["team"]["available_agents"]
+            r for r in self.config["team"]["available_agents"]
             if r not in self.active_roster
         ]
 
         return (
-            f"{role_memory}\n\n"
-            f"## Project: {self.project_name}\n\n"
-            f"## Project Memory\n{project_memory or 'None yet.'}\n\n"
-            + (f"## Project Documents\n{project_docs}\n\n" if project_docs else "")
-            +
+            f"You are Aria, the project coordinator for '{self.project_name}'. "
+            "Your ONLY job here is to decide which agents to involve and what to ask each one.\n\n"
             f"## Active Team\n" + "\n".join(team_lines) + "\n\n"
-            f"## Available to Add\n{', '.join(available) or 'All agents active.'}\n\n"
-            "## Routing Instructions\n"
-            "Organise work into sequential PHASES when tasks have dependencies:\n"
-            "  - Phase 1 (Requirements): pm + bsa gather requirements and write user stories\n"
-            "  - Phase 2 (Implementation): developer + lead implement once requirements are done\n"
-            "  - Phase 3 (QA): qa writes and runs tests once implementation is done\n"
-            "  - Phase 4 (DevOps): devops deploys once QA passes\n"
-            "Agents WITHIN a phase run in parallel. Each phase's output is fed as context "
-            "into the next phase, so Dev always receives completed requirements and QA "
-            "always receives completed implementation.\n"
-            "Use a SINGLE phase when work does not need sequencing "
-            "(e.g. simple questions, architectural discussions, research tasks).\n\n"
-            "Return ONLY valid JSON matching the provided schema. "
-            "Only include agents that are on the active team. "
-            "If the message is a simple clarification or greeting, use an empty agents list."
+            + (f"## Available to Add\n{', '.join(available)}\n\n" if available else "")
+            + (f"## Recent Project Memory\n{project_memory}\n\n" if project_memory else "")
+            + (f"## Existing Documents\n{doc_index}\n\n" if doc_index else "")
+            + "## Routing Rules\n"
+            "- Use sequential PHASES only when tasks genuinely depend on each other "
+            "(requirements → implementation → QA → devops).\n"
+            "- Use a SINGLE phase for questions, discussions, reviews, or anything "
+            "that doesn't need hand-offs.\n"
+            "- Agents within a phase run in parallel — assign each a specific task.\n"
+            "- If docs already cover requirements, skip the requirements phase.\n"
+            "- For greetings or simple clarifications, return an empty agents list.\n\n"
+            "Return ONLY valid JSON. No explanation, no markdown."
         )
+
+    def _routing_doc_index(self) -> str:
+        """Return a compact one-line-per-doc index for routing context."""
+        from pathlib import Path
+        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
+        if not docs_dir.exists():
+            return ""
+        files = sorted(docs_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if not files:
+            return ""
+        lines = []
+        for f in files[:5]:
+            # Grab first non-empty line of the doc as the summary
+            try:
+                first_line = next(
+                    (l.strip() for l in f.read_text(encoding="utf-8").splitlines()
+                     if l.strip() and not l.startswith("#")),
+                    ""
+                )[:80]
+            except Exception:
+                first_line = ""
+            lines.append(f"- {f.name}  {first_line}")
+        return "\n".join(lines)
 
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
@@ -513,7 +535,7 @@ class Orchestrator:
                 prompt=prompt,
                 schema=ROUTING_SCHEMA,
                 system_prompt=self._routing_system_prompt(),
-                model=self.model,
+                model=self.config.get("routing_model", "haiku"),
             )
         except Exception as e:
             console.print(f"[dim yellow]Routing fallback (JSON parse error): {e}[/dim yellow]")
