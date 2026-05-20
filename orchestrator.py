@@ -144,6 +144,13 @@ _FULL_FILE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Detects epic / story kickoff so a plan summary is saved to memory automatically
+_EPIC_KICKOFF_RE = re.compile(
+    r"\b(?:work\s+on|start|implement|begin|kick\s*off|tackle|do|complete|finish)\s+"
+    r"(?:epic|story|e\d+|s\d+|sprint)",
+    re.IGNORECASE,
+)
+
 # Patterns that signal the user wants to teach an agent a new skill
 _TEACH_PATTERNS = [
     (r"(?:please\s+)?teach\s+(?:the\s+)?(\w+)(?:\s+team)?\s+(.+)", 1, 2),
@@ -482,6 +489,45 @@ class Orchestrator:
             "If there are open questions for the customer, group them at the end."
         )
         return "\n".join(parts)
+
+    def _save_epic_plan_memory(self, user_input: str, agent_responses: dict):
+        """
+        After an epic/story kickoff, ask haiku to extract a structured plan summary
+        from agent responses and persist it to project memory under 'epic-plan'.
+        Zero UI — runs silently in the background.
+        """
+        personas = self.config["agent_personas"]
+        combined = "\n\n".join(
+            f"[{personas.get(r, {}).get('name', r.upper())}]:\n{resp[:1500]}"
+            for r, resp in agent_responses.items()
+        )
+        prompt = (
+            f"The customer requested: {user_input}\n\n"
+            f"The team responded:\n{combined}\n\n"
+            "Extract a concise plan summary (5-8 bullet points max) covering:\n"
+            "- Which epic/stories are being worked on\n"
+            "- Key implementation steps planned\n"
+            "- Files to be created or modified\n"
+            "- Any dependencies or blockers noted\n"
+            "- Expected outcomes\n\n"
+            "Format: plain bullet points. No headings. No preamble."
+        )
+        try:
+            summary = call_claude(
+                prompt=prompt,
+                system_prompt="You extract concise plan summaries from team conversations. Be specific and brief.",
+                model="haiku",
+            )
+            if summary.strip():
+                saved = self.memory.save_project_memory(
+                    content=f"EPIC KICKOFF — {user_input.strip()}\n{summary.strip()}",
+                    category="epic-plan",
+                    source="aria",
+                )
+                if saved:
+                    console.print("[dim green]  (📌 Epic plan saved to memory)[/dim green]")
+        except Exception:
+            pass  # non-critical — never block the main flow
 
     def _scaffold_project(self, user_input: str, requirements_output: dict):
         """
@@ -935,6 +981,10 @@ class Orchestrator:
 
         # alias for synthesis block below
         agent_responses = all_agent_responses
+
+        # ── Epic kickoff: auto-save plan summary to memory ────────────
+        if _EPIC_KICKOFF_RE.search(user_input) and agent_responses:
+            self._save_epic_plan_memory(user_input, agent_responses)
 
         # ── Auto-scaffold on first message of a new project ───────────
         # Skip when a codebase is loaded — the project already exists externally.

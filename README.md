@@ -333,18 +333,24 @@ For agents doing work (e.g. "work on Epic 1"), they read files mid-task via `REA
 
 ### Applying changes
 
-When an agent suggests file changes, you see a compact summary and a single prompt:
+When an agent suggests file changes, you see a compact summary with diff stats and a single prompt:
 
 ```
 Sam wants to write 3 files to C:\projects\my-app:
-  ✏  playwright_runner.py    (142 lines)  from app.core.config import…
-  ✏  app/core/config.py      (28 lines)   from pydantic_settings import…
-  ✏  requirements.txt        (12 lines)   fastapi==0.111.0…
+  ✨  playwright_runner.py    NEW   +142   from app.core.config import…
+  ✏   app/core/config.py     +12 -4       from pydantic_settings import…
+  ✏   requirements.txt       +3 -1        fastapi==0.111.0…
 
-  Apply all changes? [y/N]:
+  d = show diff · y = apply · N = skip
+
+  Apply all changes? [d/y/N]
 ```
 
-**y** applies everything at once. **n** discards all. No per-file drilling — just one decision.
+- **y** — applies everything at once
+- **n** — discards all
+- **d** — shows the full colour-coded diff (green = added, red = removed) before you decide. Type `d` again to re-read, then `y` or `n`
+
+New files show `✨ NEW` with a line count. Modified files show `+added -removed` counts so you know exactly what changed before approving.
 
 ### Memory across sessions
 
@@ -431,6 +437,7 @@ Facts, decisions, and constraints captured during your conversations. Auto-saved
 - You say *"remember that…"* or *"note that…"*
 - An agent outputs `REMEMBER: …` in its response
 - Aria identifies a key decision or constraint worth persisting
+- You kick off an epic or story — a plan summary (which epic, what steps, which files) is automatically extracted and saved under category `epic-plan` so the team can pick up exactly where they left off in future sessions
 
 Use `/memory` at any time to review what's been captured.
 

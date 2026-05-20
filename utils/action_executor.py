@@ -14,9 +14,11 @@ Agents signal an action by wrapping content in a tagged code block:
     npm install && npm run build
     ```
 
-File changes are collected and shown as a compact summary — one "apply all?"
-prompt for the whole batch. Bash commands are confirmed individually.
+File changes are collected and shown as a compact summary with diff stats —
+NEW / +added -removed lines. One "apply all?" prompt for the whole batch.
+Bash commands are confirmed individually.
 """
+import difflib
 import re
 import subprocess
 import sys
@@ -29,6 +31,7 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 
 console = Console()
 
@@ -85,6 +88,47 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
     return actions
 
 
+def _diff_stats(old: str, new: str) -> tuple[int, int, int]:
+    """Return (added, removed, changed_lines) between old and new content."""
+    old_lines = old.splitlines()
+    new_lines = new.splitlines()
+    added = removed = 0
+    for line in difflib.unified_diff(old_lines, new_lines, lineterm=""):
+        if line.startswith("+") and not line.startswith("+++"):
+            added += 1
+        elif line.startswith("-") and not line.startswith("---"):
+            removed += 1
+    return added, removed
+
+
+def _show_diff(old: str, new: str, path: str):
+    """Print a colour-coded unified diff for a file change."""
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+    diff = list(difflib.unified_diff(
+        old_lines, new_lines,
+        fromfile=f"  {path} (current)",
+        tofile=f"  {path} (proposed)",
+        lineterm="",
+    ))
+    if not diff:
+        console.print("  [dim](no textual changes detected)[/dim]")
+        return
+    text = Text()
+    for line in diff:
+        if line.startswith("+++") or line.startswith("---"):
+            text.append(line + "\n", style="dim")
+        elif line.startswith("@@"):
+            text.append(line + "\n", style="cyan dim")
+        elif line.startswith("+"):
+            text.append(line + "\n", style="green")
+        elif line.startswith("-"):
+            text.append(line + "\n", style="red")
+        else:
+            text.append(line + "\n", style="dim")
+    console.print(text)
+
+
 def _show_bash_action(action: Action):
     syntax = Syntax(action.content, "bash", theme="monokai")
     console.print(
@@ -98,7 +142,8 @@ def _show_bash_action(action: Action):
 
 def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
     """
-    File changes: show a compact summary, one 'apply all?' prompt.
+    File changes: show a compact summary with diff stats, one 'apply all?' prompt.
+    If the user types 'd' at the prompt, the full diff is shown before re-asking.
     Bash commands: confirmed individually (higher risk).
     Returns outcome strings fed back to the agent pipeline.
     """
@@ -113,7 +158,6 @@ def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
     if file_actions:
         console.print()
 
-        # Which agents are involved
         agents_involved = sorted({a.agent_name for a in file_actions})
         agent_str = " & ".join(f"[bold yellow]{n}[/bold yellow]" for n in agents_involved)
         n = len(file_actions)
@@ -122,23 +166,76 @@ def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
             f"[bold]{n}[/bold] file{'s' if n > 1 else ''} to [cyan]{project_dir}[/cyan]:"
         )
 
-        # Compact file table
+        # Compact file table with diff stats
         table = Table(show_header=False, box=None, padding=(0, 1, 0, 0))
         table.add_column("icon", style="dim", no_wrap=True)
         table.add_column("path", style="cyan", no_wrap=True)
-        table.add_column("info", style="dim")
-        for a in file_actions:
-            lines = a.content.splitlines()
-            preview = lines[0][:55].strip() if lines else ""
-            if len(lines[0]) > 55 if lines else False:
-                preview += "…"
-            table.add_row("✏", a.label, f"{len(lines)} lines  {preview}")
-        console.print(table)
+        table.add_column("stats", no_wrap=True)
+        table.add_column("preview", style="dim")
 
-        approved = Confirm.ask(
-            f"\n  Apply {'all ' if n > 1 else ''}{'change' if n == 1 else 'changes'}?",
-            default=False,
-        )
+        file_states: dict[str, dict] = {}  # label → {is_new, old_content, added, removed}
+        for a in file_actions:
+            dest = (project_dir / a.label).resolve()
+            is_new = not dest.exists()
+            old_content = ""
+            added = removed = 0
+            if not is_new:
+                try:
+                    old_content = dest.read_text(encoding="utf-8", errors="replace")
+                    added, removed = _diff_stats(old_content, a.content)
+                except Exception:
+                    is_new = True  # treat as new if unreadable
+            else:
+                added = len(a.content.splitlines())
+
+            file_states[a.label] = {
+                "is_new": is_new,
+                "old_content": old_content,
+                "added": added,
+                "removed": removed,
+            }
+
+            if is_new:
+                stats = Text("NEW", style="bold green")
+                stats.append(f"  +{added}", style="green")
+            else:
+                stats = Text()
+                if added:
+                    stats.append(f"+{added} ", style="green")
+                if removed:
+                    stats.append(f"-{removed}", style="red")
+                if not added and not removed:
+                    stats.append("unchanged", style="dim")
+
+            lines = a.content.splitlines()
+            preview = (lines[0][:50].strip() + "…") if lines and len(lines[0]) > 50 else (lines[0].strip() if lines else "")
+            icon = "✨" if is_new else "✏ "
+            table.add_row(icon, a.label, stats, preview)
+
+        console.print(table)
+        console.print("[dim]  d = show diff · y = apply · N = skip[/dim]")
+
+        while True:
+            raw = console.input(
+                f"\n  Apply {'all ' if n > 1 else ''}{'change' if n == 1 else 'changes'}? [d/y/N] "
+            ).strip().lower()
+            if raw == "d":
+                # Show diffs for all changed (non-new) files
+                console.print()
+                for a in file_actions:
+                    state = file_states[a.label]
+                    if state["is_new"]:
+                        suffix = Path(a.label).suffix.lstrip(".") or "text"
+                        console.print(f"\n[bold green]✨ NEW[/bold green]  [cyan]{a.label}[/cyan]")
+                        console.print(Syntax(a.content[:3000], suffix, theme="monokai", line_numbers=True))
+                    else:
+                        console.print(f"\n[bold yellow]✏  DIFF[/bold yellow]  [cyan]{a.label}[/cyan]")
+                        _show_diff(state["old_content"], a.content, a.label)
+                console.print()
+                console.print("[dim]  d = show diff again · y = apply · N = skip[/dim]")
+                continue
+            approved = raw in ("y", "yes")
+            break
 
         if approved:
             console.print()
@@ -146,7 +243,14 @@ def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
                 dest = (project_dir / a.label).resolve()
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(a.content, encoding="utf-8")
-                console.print(f"  [green]✓[/green]  {a.label}")
+                state = file_states[a.label]
+                if state["is_new"]:
+                    console.print(f"  [green]✓[/green]  {a.label}  [dim green](new)[/dim green]")
+                else:
+                    console.print(
+                        f"  [green]✓[/green]  {a.label}  "
+                        f"[green]+{state['added']}[/green] [red]-{state['removed']}[/red]"
+                    )
                 outcomes.append(f"FILE WRITTEN: {a.label}")
             console.print()
         else:
