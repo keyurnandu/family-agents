@@ -384,7 +384,11 @@ class Orchestrator:
             "that doesn't need hand-offs.\n"
             "- Agents within a phase run in parallel — assign each a specific task.\n"
             "- If docs already cover requirements, skip the requirements phase.\n"
-            "- For greetings or simple clarifications, return an empty agents list.\n\n"
+            "- For greetings or simple clarifications, return an empty agents list.\n"
+            "- If the customer asks about sprint details, epics, stories, requirements, or any "
+            "document — route to the relevant specialist (bsa for requirements/stories, "
+            "pm for sprints/plans, lead for architecture). Never return empty agents for "
+            "document questions, even if they sound simple.\n\n"
             "Return ONLY valid JSON. No explanation, no markdown."
         )
 
@@ -412,24 +416,48 @@ class Orchestrator:
         return "\n".join(lines)
 
     def _synthesis_system_prompt(self) -> str:
-        """System prompt for Aria's synthesis call — includes CRITICAL CONSTRAINT."""
+        """System prompt for Aria's synthesis/direct-answer calls.
+        Includes role memory, project documents, and CRITICAL CONSTRAINT so Aria
+        never asks the customer to re-provide information that is already on disk."""
         role_memory = self.memory.load_role_memory("orchestrator")
+
+        # Inject project docs — same slice agents get — so Aria can answer
+        # document questions directly without routing to a specialist.
+        cfg = self.config
+        max_docs = cfg.get("max_project_docs", 1)
+        max_doc_chars = cfg.get("max_doc_chars", 1500)
+        docs_text = self.memory.load_project_docs(max_docs=max_docs, max_chars_each=max_doc_chars)
+        docs_section = (
+            f"\n\n## Project Documents\n{docs_text}"
+            if docs_text else ""
+        )
+
+        # Also inject a small slice of project memory for context
+        routing_mem_limit = cfg.get("max_routing_memory", 8)
+        project_memory = self.memory.load_project_memory(limit=routing_mem_limit)
+        memory_section = (
+            f"\n\n## Project Memory (recent)\n{project_memory}"
+            if project_memory else ""
+        )
+
         constraint = (
-            "## CRITICAL CONSTRAINT\n"
+            "\n\n## CRITICAL CONSTRAINT\n"
             "You are running as a TEXT-ONLY agent. "
             "You have NO access to Write, Edit, Read, Bash, or any file-system tools. "
             "Do NOT attempt to call any tools. "
             "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
             "none of that applies here.\n\n"
+            "IMPORTANT: Never ask the customer to provide a file path, paste content, or share a "
+            "link to information that is already in your Project Documents section above. "
+            "If a document is in context, use it directly.\n\n"
             "When agents include EXEC: file or bash blocks in their responses, those are already "
             "queued for the customer's approval by the Python harness. "
             "In your synthesis, simply tell the customer what the team is proposing to write or run — "
-            "do NOT re-explain the mechanism, do NOT ask them to approve anything special, "
-            "do NOT suggest .claude/ config files or settings. "
-            "Just say e.g. 'Sam and Jordan are ready to write config.py and playwright_runner.py — "
+            "do NOT re-explain the mechanism, do NOT ask them to approve anything special. "
+            "Just say e.g. 'Sam and Jordan are ready to write config.py — "
             "you will be prompted to approve each file.'"
         )
-        return f"{role_memory}\n\n{constraint}"
+        return f"{role_memory}{docs_section}{memory_section}{constraint}"
 
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
