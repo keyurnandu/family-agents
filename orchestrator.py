@@ -890,13 +890,8 @@ class Orchestrator:
                         "Run [bold cyan]/load <new-path>[/bold cyan] to point the team at your code.\n"
                     )
                     return
-            else:
-                console.print(
-                    "\n[yellow]No codebase loaded.[/yellow] "
-                    "Run [bold cyan]/load <path-to-your-project>[/bold cyan] "
-                    "to point the team at your code.\n"
-                )
-                return
+            # If no saved path exists this is a normal project with no external codebase
+            # (e.g. a brand-new project being built from scratch). Fall through to routing.
 
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
