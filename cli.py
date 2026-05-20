@@ -504,15 +504,36 @@ def main(project: str | None, list_projects: bool, model: str | None):
             # ── /switch [name|number] ─────────────────────────────────
             elif parts[0] == "/switch":
                 saved = db.list_projects()
+                existing_names = {p["name"] for p in saved}
+
+                def _validate_switch(name: str) -> bool:
+                    """Return True if name is a valid switch target, print error if not."""
+                    if name == GENERAL:
+                        return True
+                    if name in existing_names:
+                        return True
+                    # Not found — suggest close matches
+                    close = [n for n in existing_names if n != GENERAL and
+                             (n.startswith(name[:3]) or name[:3] in n or
+                              abs(len(n) - len(name)) <= 3)]
+                    msg = f"[yellow]No project named '[bold]{name}[/bold]'.[/yellow]"
+                    if close:
+                        suggestions = "  ".join(f"[cyan]{c}[/cyan]" for c in close[:3])
+                        msg += f"  Did you mean: {suggestions}?"
+                    else:
+                        msg += "  [dim]Use /new to create it, or /switch to pick from the list.[/dim]"
+                    console.print(msg)
+                    return False
 
                 if len(parts) > 1:
                     arg = parts[1].strip()
-                    # Allow /switch _general directly
                     if arg == GENERAL:
                         name = GENERAL
                     else:
                         name = _pick_from_list(arg, saved)
                         if name is None:
+                            continue
+                        if not _validate_switch(name):
                             continue
                 else:
                     _show_startup_hint(saved)
@@ -526,6 +547,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
                         continue
                     name = _pick_from_list(arg, saved) if arg != GENERAL else GENERAL
                     if name is None:
+                        continue
+                    if not _validate_switch(name):
                         continue
 
                 if name == current_project:
