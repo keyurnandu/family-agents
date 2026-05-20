@@ -326,7 +326,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     continue
 
             # @mention → route through general chat
-            if re.match(r"^@\w+", user_input):
+            elif re.match(r"^@\w+", user_input):
                 console.print(
                     "[dim]💬 Routing to general chat (no project open)…[/dim]"
                 )
