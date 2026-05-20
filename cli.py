@@ -266,8 +266,20 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
             # Slash commands
             if user_input.startswith("/"):
-                _handle_pre_project_command(user_input, saved, config, display)
-                continue
+                cmd_lower = user_input.lower()
+                # /load, /unload, /edit-mode work without a named project —
+                # silently open general chat and fall through to the handler below
+                if (
+                    cmd_lower.startswith("/load")
+                    or cmd_lower == "/unload"
+                    or cmd_lower.startswith("/edit-mode")
+                ):
+                    current_project = GENERAL
+                    orchestrator = _open_project(GENERAL, db, display, model)
+                    # fall through to the in-session command handler below
+                else:
+                    _handle_pre_project_command(user_input, saved, config, display)
+                    continue
 
             # @mention → route through general chat
             if re.match(r"^@\w+", user_input):
