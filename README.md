@@ -307,8 +307,9 @@ If an agent needs to go deeper into a specific file, it requests it automaticall
 
 ### Reading files instantly
 
-Simple file-read requests are served directly from disk — **zero LLM calls**, instant response:
+Simple file-read requests are served directly from disk — **zero LLM calls**, instant response.
 
+**Exact filename** (any file with an extension):
 ```
 You: show config.py
 You: read sprint.md
@@ -316,12 +317,19 @@ You: display src/auth/middleware.ts
 You: show full requirements.txt      ← no truncation, complete file
 ```
 
-Works with: `read`, `show`, `display`, `view`, `open`, `print`, `cat`, `get`, `fetch`, `see` + any filename with an extension. The file is shown with syntax highlighting and line numbers.
+**Fuzzy doc name** (keywords matched against your exported docs folder — no extension needed):
+```
+You: read the sprint details          → matches sprint-plan-2026-05-20.md
+You: show epics and stories           → matches epics-and-user-stories-*.md
+You: can you read the requirements    → matches requirements-doc-*.md
+```
 
-- Default cap: **20,000 chars**. Anything larger shows a note at the bottom.
-- Add `full` / `entire` / `complete` to the request to remove the cap entirely.
+Works with intent words: `read`, `show`, `display`, `view`, `open`, `print`, `cat`, `get`, `fetch`, `see`. The file is shown with syntax highlighting and line numbers.
 
-For agents doing work (e.g. "work on Epic 1"), they can still request files mid-task with `READ_FILE:<path>`. Those reads are capped at 8,000 chars unless the task explicitly asks for the full file.
+- Default cap: **20,000 chars**. Anything larger shows a truncation note.
+- Add `full` / `entire` / `complete` to remove the cap entirely.
+
+For agents doing work (e.g. "work on Epic 1"), they read files mid-task via `READ_FILE:<path>`. Those reads are capped at 8,000 chars unless the task explicitly asks for the full file.
 
 ### Applying changes
 
