@@ -166,6 +166,31 @@ class Display:
         ))
         console.print()
 
+    def show_codebase_loaded(self, path, ctx: dict):
+        from rich.panel import Panel
+        tech = ", ".join(ctx.get("tech_stack", [])) or "unknown"
+        total = ctx.get("total_files", "?")
+        key_count = len(ctx.get("key_files", {}))
+        tree = ctx.get("structure_tree", "")
+        # Show first 30 lines of tree
+        tree_preview = "\n".join(tree.splitlines()[:30])
+        if len(tree.splitlines()) > 30:
+            tree_preview += f"\n[dim]… +{len(tree.splitlines())-30} more[/dim]"
+
+        console.print(Panel(
+            f"[bold green]✓ Codebase loaded[/bold green]\n\n"
+            f"[bold]Path:[/bold]       {path}\n"
+            f"[bold]Tech stack:[/bold] [cyan]{tech}[/cyan]\n"
+            f"[bold]Files:[/bold]      {total} total · {key_count} key files read\n\n"
+            f"[bold]Structure:[/bold]\n[dim]{tree_preview}[/dim]\n\n"
+            "[dim]Mode: [bold]READ-ONLY[/bold]  —  use [bold]/edit-mode on[/bold] to enable writes\n"
+            "Agents see the full structure above. They can request specific files with READ_FILE:<path>.[/dim]",
+            title="[bold]Codebase Loaded[/bold]",
+            border_style="green",
+            padding=(1, 2),
+        ))
+        console.print()
+
     def show_memory(self, entries: list, project_name: str):
         if not entries:
             console.print(
@@ -237,6 +262,9 @@ class Display:
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"
             "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
+            "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
+            "  [cyan]/unload[/cyan]            Unload the current codebase\n"
+            "  [cyan]/edit-mode on|off[/cyan]  Enable/disable writes to the loaded codebase\n"
             "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
             "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"

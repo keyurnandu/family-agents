@@ -139,6 +139,9 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
+| `/load <path>` | Load an existing codebase for review or editing |
+| `/unload` | Unload the current codebase |
+| `/edit-mode on\|off` | Enable or disable writes to the loaded codebase |
 | `/help` | Show full help |
 | `/quit` | Exit |
 
@@ -220,6 +223,87 @@ You: add GraphQL expertise to jordan
 ```
 
 Skills show up in `/team` as a count next to each agent so you always know what the team has learned. Skill content is AI-generated from your description — a few focused bullet points are added to the agent's system prompt.
+
+---
+
+## Codebase Review & Editing
+
+Point the team at any existing project on your machine — they'll scan it, understand the structure, and help you review, extend, or refactor it.
+
+### Load a codebase
+
+```bash
+/load C:\projects\my-app
+/load /home/user/my-api
+```
+
+On load, the team automatically:
+- Builds a depth-2 folder tree of the project
+- Reads key files (`README`, entry points, config files, `package.json` / `requirements.txt`, etc.)
+- Detects the tech stack
+- Saves a summary to project memory
+
+A panel confirms what was found:
+
+```
+╭─ Codebase Loaded ───────────────────────────────────────╮
+│  ✓ Codebase loaded                                       │
+│                                                          │
+│  Path:       C:\projects\my-app                          │
+│  Tech stack: TypeScript, React, Node.js                  │
+│  Files:      84 total · 6 key files read                 │
+│                                                          │
+│  Structure:                                              │
+│    my-app/                                               │
+│    ├── src/                                              │
+│    │   ├── components/                                   │
+│    │   └── api/                                          │
+│    └── package.json                                      │
+│                                                          │
+│  Mode: READ-ONLY — use /edit-mode on to enable writes    │
+╰─────────────────────────────────────────────────────────╯
+```
+
+### Talk to the team about the codebase
+
+Once loaded, just chat normally — agents know the full structure and key file contents:
+
+```
+You: review the architecture and flag any concerns
+You: @jordan what would you change about this API design?
+You: @casey what test coverage is missing?
+You: how does the authentication flow work?
+```
+
+If an agent needs to go deeper into a specific file, it requests it automatically with `READ_FILE:<path>` — no action needed from you.
+
+### Deep dives on specific files
+
+You can also ask directly:
+
+```
+You: @sam walk me through src/auth/middleware.ts
+You: explain what the database migration scripts do
+```
+
+The agent will read the file on demand and explain it in context.
+
+### Edit mode
+
+By default the codebase is **read-only** — agents can analyse and suggest, but nothing is written. When you're ready to apply changes:
+
+```bash
+/edit-mode on    # allow agents to write to the loaded codebase
+/edit-mode off   # back to read-only
+```
+
+With edit mode on, agents write files using the same permission-prompted flow as normal project files — you approve each write before it happens.
+
+### Unload
+
+```bash
+/unload    # removes the codebase from the team's context
+```
 
 ---
 

@@ -64,6 +64,36 @@ class Agent:
         ]
         if skills_text:
             sections.append(f"## Additional Skills & Expertise\n{skills_text}")
+
+        # Inject loaded codebase context
+        if self.orchestrator:
+            loaded_path = getattr(self.orchestrator, "loaded_path", None)
+            ctx = getattr(self.orchestrator, "codebase_context", {})
+            edit_mode = getattr(self.orchestrator, "edit_mode", False)
+            if loaded_path and ctx:
+                codebase_lines = [
+                    f"## Loaded Codebase: {loaded_path}",
+                    f"Tech stack: {', '.join(ctx.get('tech_stack', [])) or 'unknown'}",
+                    f"Total files: {ctx.get('total_files', '?')}",
+                    "",
+                    "### Folder Structure",
+                    "```",
+                    ctx.get("structure_tree", ""),
+                    "```",
+                ]
+                for fname, content in ctx.get("key_files", {}).items():
+                    codebase_lines += [f"\n### {fname}", "```", content, "```"]
+                mode_note = (
+                    "You are in READ-ONLY mode. Analyse and review only. "
+                    "Do NOT output EXEC: blocks. "
+                    "To read a specific file for deeper analysis, output READ_FILE:<relative-path> on its own line."
+                    if not edit_mode else
+                    "You are in EDIT mode. You may suggest changes via EXEC:file: blocks using paths relative to the project root. "
+                    "To read a specific file first, output READ_FILE:<relative-path>."
+                )
+                codebase_lines += ["", "### Mode", mode_note]
+                sections.append("\n".join(codebase_lines))
+
         sections.append(
             "## Working Instructions\n"
             "- Stay in your domain — answer from your role's perspective\n"
@@ -136,6 +166,43 @@ class Agent:
             response = call_claude(prompt=prompt, system_prompt=system_prompt, model=self.model)
         except Exception as e:
             return f"(error calling {self.name}: {e})"
+
+        # Handle READ_FILE: markers for deep-dive requests
+        if self.orchestrator:
+            loaded_path = getattr(self.orchestrator, "loaded_path", None)
+            if loaded_path:
+                read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
+                if read_requests:
+                    file_contents: dict[str, str] = {}
+                    for req in read_requests[:5]:  # cap at 5 files per response
+                        fpath = (loaded_path / req.strip()).resolve()
+                        # Safety: only read files inside the loaded path
+                        try:
+                            fpath.relative_to(loaded_path)
+                            if fpath.exists() and fpath.is_file():
+                                content = fpath.read_text(encoding="utf-8", errors="replace")
+                                file_contents[req.strip()] = content[:3000]
+                        except (ValueError, Exception):
+                            pass
+                    if file_contents:
+                        file_ctx = "\n\n".join(
+                            f"### {fname}\n```\n{content}\n```"
+                            for fname, content in file_contents.items()
+                        )
+                        follow_up = (
+                            f"{prompt}\n\n"
+                            "You requested these files. Here are their contents:\n\n"
+                            f"{file_ctx}\n\n"
+                            "Now provide your complete analysis/response."
+                        )
+                        try:
+                            response = call_claude(
+                                prompt=follow_up,
+                                system_prompt=system_prompt,
+                                model=self.model,
+                            )
+                        except Exception:
+                            pass  # keep original response
 
         # Handle ASK_COLLEAGUE markers (one round only)
         colleagues_needed = re.findall(

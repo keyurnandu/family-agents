@@ -191,9 +191,104 @@ class Orchestrator:
             len(history) == 0 and project_name != "_general"
         )
 
+        # Loaded external codebase (set by /load command)
+        self.loaded_path: Path | None = None
+        self.codebase_context: dict = {}
+        self.edit_mode: bool = False
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _scan_codebase(self, path: Path) -> dict:
+        """Scan an external codebase — structure tree + key files."""
+        KEY_FILES = [
+            "README.md", "README.rst", "README.txt",
+            "package.json", "requirements.txt", "setup.py", "pyproject.toml",
+            "pom.xml", "build.gradle", "go.mod", "Cargo.toml",
+            ".env.example", "Dockerfile", "docker-compose.yml",
+            "tsconfig.json", ".eslintrc.js", ".eslintrc.json",
+        ]
+        ENTRY_POINTS = [
+            "index.js", "index.ts", "main.js", "main.ts",
+            "app.js", "app.ts", "src/index.js", "src/index.ts",
+            "src/main.js", "src/main.ts", "src/app.js", "src/app.ts",
+            "main.py", "app.py", "manage.py", "run.py",
+            "src/main.py", "src/app.py",
+        ]
+        IGNORE = {
+            ".git", "node_modules", "__pycache__", ".venv", "venv",
+            "dist", "build", ".next", "target", ".gradle", ".idea", ".vscode",
+        }
+
+        def build_tree(p: Path, prefix: str = "", depth: int = 0) -> list[str]:
+            if depth > 2:
+                return []
+            lines: list[str] = []
+            try:
+                items = sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
+            except PermissionError:
+                return []
+            visible = [i for i in items if i.name not in IGNORE and not i.name.startswith(".")]
+            for idx, item in enumerate(visible):
+                connector = "└── " if idx == len(visible) - 1 else "├── "
+                lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
+                if item.is_dir() and depth < 2:
+                    ext = "    " if idx == len(visible) - 1 else "│   "
+                    lines.extend(build_tree(item, prefix + ext, depth + 1))
+            return lines
+
+        tree_lines = [f"{path.name}/"] + build_tree(path)
+        structure_tree = "\n".join(tree_lines[:100])
+
+        key_file_contents: dict[str, str] = {}
+        for fname in KEY_FILES:
+            fpath = path / fname
+            if fpath.exists() and fpath.is_file():
+                try:
+                    key_file_contents[fname] = fpath.read_text(encoding="utf-8", errors="replace")[:2000]
+                except Exception:
+                    pass
+
+        for ep in ENTRY_POINTS:
+            ep_path = path / ep
+            if ep_path.exists() and ep_path.is_file() and ep not in key_file_contents:
+                try:
+                    key_file_contents[ep] = ep_path.read_text(encoding="utf-8", errors="replace")[:1500]
+                except Exception:
+                    pass
+                break
+
+        tech_stack: list[str] = []
+        if (path / "package.json").exists():
+            tech_stack.append("Node.js/JavaScript")
+        if (path / "tsconfig.json").exists():
+            tech_stack.append("TypeScript")
+        if any((path / f).exists() for f in ["requirements.txt", "setup.py", "pyproject.toml"]):
+            tech_stack.append("Python")
+        if (path / "pom.xml").exists():
+            tech_stack.append("Java/Maven")
+        if (path / "build.gradle").exists():
+            tech_stack.append("Java/Gradle")
+        if (path / "go.mod").exists():
+            tech_stack.append("Go")
+        if (path / "Cargo.toml").exists():
+            tech_stack.append("Rust")
+        if (path / "Dockerfile").exists():
+            tech_stack.append("Docker")
+
+        IGNORE_COUNT = IGNORE | {".env"}
+        total_files = sum(
+            1 for f in path.rglob("*")
+            if f.is_file() and not any(ig in f.parts for ig in IGNORE_COUNT)
+        )
+
+        return {
+            "structure_tree": structure_tree,
+            "key_files": key_file_contents,
+            "tech_stack": tech_stack,
+            "total_files": total_files,
+        }
 
     def _format_history(self) -> str:
         if not self.messages:
@@ -346,7 +441,14 @@ class Orchestrator:
             )
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
-                prompt_and_execute(actions, project_dir)
+                if self.loaded_path and not self.edit_mode:
+                    console.print(
+                        f"[dim yellow]  ⚠ {p.get('name', role.upper())} suggested file changes — "
+                        "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
+                    )
+                else:
+                    write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
+                    prompt_and_execute(actions, write_dir)
 
             self.memory.extract_and_save_memories(response, role)
 
@@ -547,9 +649,16 @@ class Orchestrator:
                 # Permission-gated action execution
                 actions = parse_actions(response, name)
                 if actions:
-                    outcomes = prompt_and_execute(actions, project_dir)
-                    if outcomes:
-                        phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                    if self.loaded_path and not self.edit_mode:
+                        console.print(
+                            f"[dim yellow]  ⚠ {name} suggested file changes — "
+                            "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
+                        )
+                    else:
+                        write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
+                        outcomes = prompt_and_execute(actions, write_dir)
+                        if outcomes:
+                            phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
                 # Auto-extract REMEMBER: markers
                 saved_count = self.memory.extract_and_save_memories(response, role)
@@ -702,9 +811,16 @@ class Orchestrator:
         project_dir.mkdir(parents=True, exist_ok=True)
         actions = parse_actions(response, name)
         if actions:
-            outcomes = prompt_and_execute(actions, project_dir)
-            if outcomes:
-                response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+            if self.loaded_path and not self.edit_mode:
+                console.print(
+                    f"[dim yellow]  ⚠ {name} suggested file changes — "
+                    "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
+                )
+            else:
+                write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
+                outcomes = prompt_and_execute(actions, write_dir)
+                if outcomes:
+                    response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
         self.memory.extract_and_save_memories(response, role)
         self.db.save_message(self.project_name, "assistant", response)
@@ -714,6 +830,43 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Slash command handlers
     # ------------------------------------------------------------------
+
+    def load_codebase(self, path_str: str):
+        path = Path(path_str).expanduser().resolve()
+        if not path.exists():
+            console.print(f"[red]Path not found:[/red] {path}")
+            return
+        if not path.is_dir():
+            console.print(f"[red]Not a directory:[/red] {path}")
+            return
+
+        with console.status(f"[dim]Scanning {path.name}…[/dim]", spinner="dots"):
+            ctx = self._scan_codebase(path)
+
+        self.loaded_path = path
+        self.codebase_context = ctx
+        self.edit_mode = False
+
+        self.memory.save_project_memory(
+            content=(
+                f"Codebase loaded: {path}\n"
+                f"Tech stack: {', '.join(ctx['tech_stack']) or 'unknown'}\n"
+                f"Files: {ctx['total_files']}"
+            ),
+            category="technical",
+            source="load",
+        )
+        self.display.show_codebase_loaded(path, ctx)
+
+    def unload_codebase(self):
+        if not self.loaded_path:
+            console.print("[dim]No codebase loaded.[/dim]")
+            return
+        path = self.loaded_path
+        self.loaded_path = None
+        self.codebase_context = {}
+        self.edit_mode = False
+        console.print(f"[dim]Unloaded: {path}[/dim]\n")
 
     def _generate_skill_content(self, role: str, agent_name: str, skill_description: str) -> str:
         """Ask Claude to expand a raw skill description into proper agent instructions."""
