@@ -396,6 +396,26 @@ class Orchestrator:
             lines.append(f"- {f.name}  {first_line}")
         return "\n".join(lines)
 
+    def _synthesis_system_prompt(self) -> str:
+        """System prompt for Aria's synthesis call — includes CRITICAL CONSTRAINT."""
+        role_memory = self.memory.load_role_memory("orchestrator")
+        constraint = (
+            "## CRITICAL CONSTRAINT\n"
+            "You are running as a TEXT-ONLY agent. "
+            "You have NO access to Write, Edit, Read, Bash, or any file-system tools. "
+            "Do NOT attempt to call any tools. "
+            "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
+            "none of that applies here.\n\n"
+            "When agents include EXEC: file or bash blocks in their responses, those are already "
+            "queued for the customer's approval by the Python harness. "
+            "In your synthesis, simply tell the customer what the team is proposing to write or run — "
+            "do NOT re-explain the mechanism, do NOT ask them to approve anything special, "
+            "do NOT suggest .claude/ config files or settings. "
+            "Just say e.g. 'Sam and Jordan are ready to write config.py and playwright_runner.py — "
+            "you will be prompted to approve each file.'"
+        )
+        return f"{role_memory}\n\n{constraint}"
+
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
             f"The customer said:\n{user_input}\n\n"
@@ -404,11 +424,15 @@ class Orchestrator:
         personas = self.config["agent_personas"]
         for role, response in agent_responses.items():
             name = personas.get(role, {}).get("name", role.upper())
-            parts.append(f"[{name} — {role.upper()}]\n{response}\n")
+            # Strip EXEC block content — Aria doesn't need to see 200-line files;
+            # she just needs to know the agent is proposing writes.
+            display_response = self._strip_exec_for_display(response)
+            parts.append(f"[{name} — {role.upper()}]\n{display_response}\n")
 
         parts.append(
             "\nAs Aria, the coordinator, synthesize these into a clear, unified response "
             "for the customer. Be concise. Credit team members where relevant. "
+            "If agents have file changes queued, tell the customer they will be prompted to approve them. "
             "If there are open questions for the customer, group them at the end."
         )
         return "\n".join(parts)
@@ -749,7 +773,7 @@ class Orchestrator:
                 try:
                     final_response = call_claude(
                         prompt=synth_prompt,
-                        system_prompt=self.memory.load_role_memory("orchestrator"),
+                        system_prompt=self._synthesis_system_prompt(),
                         model=self.model,
                     )
                 except Exception as e:
@@ -764,7 +788,7 @@ class Orchestrator:
                             f"{self._format_history()}\n\nCustomer: {user_input}\n\n"
                             "Respond as Aria, the project coordinator."
                         ),
-                        system_prompt=self.memory.load_role_memory("orchestrator"),
+                        system_prompt=self._synthesis_system_prompt(),
                         model=self.model,
                     )
                 except Exception as e:
