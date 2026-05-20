@@ -300,6 +300,28 @@ class Orchestrator:
             "total_files": total_files,
         }
 
+    def _strip_exec_for_display(self, text: str) -> str:
+        """Replace EXEC block content with a compact placeholder for display.
+        The full content is shown in the apply prompt — no need to print it twice."""
+        def _file_placeholder(m):
+            path = m.group(1).strip()
+            lines = len(m.group(2).strip().splitlines())
+            return f"\n[📄 `{path}` — {lines} lines · shown in apply prompt]\n"
+
+        text = re.sub(
+            r"EXEC:file:([^\n]+)\n```[^\n]*\n(.*?)```",
+            _file_placeholder,
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = re.sub(
+            r"EXEC:bash\s*\n```[^\n]*\n.*?```",
+            "\n[🔧 shell command · shown in apply prompt]\n",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        return text.strip()
+
     def _format_history(self) -> str:
         if not self.messages:
             return ""
@@ -452,7 +474,8 @@ class Orchestrator:
         for role, response in scaffold_responses.items():
             p = personas.get(role, {})
             self.display.show_agent_response(
-                p.get("name", role.upper()), response, p.get("color", "white"), p.get("emoji", "")
+                p.get("name", role.upper()), self._strip_exec_for_display(response),
+                p.get("color", "white"), p.get("emoji", "")
             )
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
@@ -653,7 +676,7 @@ class Orchestrator:
                 color = p.get("color", "white")
                 emoji = p.get("emoji", "")
 
-                self.display.show_agent_response(name, response, color, emoji)
+                self.display.show_agent_response(name, self._strip_exec_for_display(response), color, emoji)
 
                 # Permission-gated action execution
                 actions = parse_actions(response, name)
@@ -689,9 +712,12 @@ class Orchestrator:
         agent_responses = all_agent_responses
 
         # ── Auto-scaffold on first message of a new project ───────────
-        if self.is_new_project and agent_responses:
+        # Skip when a codebase is loaded — the project already exists externally.
+        if self.is_new_project and agent_responses and not self.loaded_path:
             self.is_new_project = False  # only once per project lifetime
             self._scaffold_project(user_input, agent_responses)
+        elif self.is_new_project and self.loaded_path:
+            self.is_new_project = False  # loaded project — never scaffold
 
         # Synthesize if multiple agents responded; otherwise Aria speaks directly
         final_response = ""
@@ -808,7 +834,7 @@ class Orchestrator:
             console.print()
             return
 
-        self.display.show_agent_response(name, response, color, emoji)
+        self.display.show_agent_response(name, self._strip_exec_for_display(response), color, emoji)
 
         project_dir = self.base_dir / "projects" / self.project_name
         project_dir.mkdir(parents=True, exist_ok=True)

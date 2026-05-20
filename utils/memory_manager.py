@@ -116,7 +116,7 @@ class MemoryManager:
         if memory_file.exists():
             memory_file.unlink()
 
-    def load_project_docs(self, max_docs: int = 3, max_chars_each: int = 1500) -> str:
+    def load_project_docs(self, max_docs: int = 3, max_chars_each: int = 3000) -> str:
         """
         Load the most recently exported docs from projects/<name>/docs/.
         Returns a combined string injected into agent system prompts so agents

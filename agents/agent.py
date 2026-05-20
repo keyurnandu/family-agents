@@ -185,47 +185,63 @@ class Agent:
         # Handle READ_FILE: markers for deep-dive requests
         if self.orchestrator:
             loaded_path = getattr(self.orchestrator, "loaded_path", None)
-            if loaded_path:
-                read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
-                if read_requests:
-                    file_contents: dict[str, str] = {}
-                    READ_FILE_LIMIT = 8000  # chars — generous for a targeted file read
-                    for req in read_requests[:5]:  # cap at 5 files per response
-                        fpath = (loaded_path / req.strip()).resolve()
-                        # Safety: only read files inside the loaded path
+            read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
+            if read_requests:
+                file_contents: dict[str, str] = {}
+                READ_FILE_LIMIT = 8000  # chars — generous for a targeted file read
+                project_docs_dir = self.base_dir / "projects" / self.memory.project_name
+
+                for req in read_requests[:5]:  # cap at 5 files per response
+                    req_clean = req.strip()
+                    raw = None
+
+                    # 1. Check project docs/files first (requirements, sprint plans, etc.)
+                    candidate = (project_docs_dir / req_clean).resolve()
+                    try:
+                        candidate.relative_to(project_docs_dir)
+                        if candidate.exists() and candidate.is_file():
+                            raw = candidate.read_text(encoding="utf-8", errors="replace")
+                    except (ValueError, Exception):
+                        pass
+
+                    # 2. Fall back to loaded codebase
+                    if raw is None and loaded_path:
                         try:
+                            fpath = (loaded_path / req_clean).resolve()
                             fpath.relative_to(loaded_path)
                             if fpath.exists() and fpath.is_file():
                                 raw = fpath.read_text(encoding="utf-8", errors="replace")
-                                if len(raw) > READ_FILE_LIMIT:
-                                    file_contents[req.strip()] = (
-                                        raw[:READ_FILE_LIMIT]
-                                        + f"\n\n[File truncated — {len(raw):,} chars total. "
-                                        "Request a specific section or line range if you need more.]"
-                                    )
-                                else:
-                                    file_contents[req.strip()] = raw
                         except (ValueError, Exception):
                             pass
-                    if file_contents:
-                        file_ctx = "\n\n".join(
-                            f"### {fname}\n```\n{content}\n```"
-                            for fname, content in file_contents.items()
-                        )
-                        follow_up = (
-                            f"{prompt}\n\n"
-                            "You requested these files. Here are their contents:\n\n"
-                            f"{file_ctx}\n\n"
-                            "Now provide your complete analysis/response."
-                        )
-                        try:
-                            response = call_claude(
-                                prompt=follow_up,
-                                system_prompt=system_prompt,
-                                model=self.model,
+
+                    if raw is not None:
+                        if len(raw) > READ_FILE_LIMIT:
+                            file_contents[req_clean] = (
+                                raw[:READ_FILE_LIMIT]
+                                + f"\n\n[File truncated — {len(raw):,} chars total. "
+                                "Request a specific section or line range if you need more.]"
                             )
-                        except Exception:
-                            pass  # keep original response
+                        else:
+                            file_contents[req_clean] = raw
+                if file_contents:
+                    file_ctx = "\n\n".join(
+                        f"### {fname}\n```\n{content}\n```"
+                        for fname, content in file_contents.items()
+                    )
+                    follow_up = (
+                        f"{prompt}\n\n"
+                        "You requested these files. Here are their contents:\n\n"
+                        f"{file_ctx}\n\n"
+                        "Now provide your complete analysis/response."
+                    )
+                    try:
+                        response = call_claude(
+                            prompt=follow_up,
+                            system_prompt=system_prompt,
+                            model=self.model,
+                        )
+                    except Exception:
+                        pass  # keep original response
 
         # Handle ASK_COLLEAGUE markers (one round only)
         colleagues_needed = re.findall(
