@@ -152,22 +152,12 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
         model_override=model,
     )
 
-    # ── Offer to reload a codebase from the previous session ──────────
+    # ── Auto-reload codebase from the previous session (no prompt) ────
     saved_cb = orch.memory.load_loaded_path()
     if saved_cb:
         cb_path = Path(saved_cb)
         if cb_path.exists() and cb_path.is_dir():
-            try:
-                answer = Prompt.ask(
-                    f"[dim]Last session had [cyan]{saved_cb}[/cyan] loaded — reload it?[/dim] [Y/n]",
-                    default="y",
-                ).strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                answer = "y"
-            if answer in ("y", "yes", ""):
-                orch.load_codebase(saved_cb)
-            else:
-                console.print("[dim]Skipped — use /load to reload anytime.[/dim]\n")
+            orch.load_codebase(saved_cb)
         else:
             # Path no longer exists — silently drop the saved reference
             orch.memory.clear_loaded_path()

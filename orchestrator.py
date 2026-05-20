@@ -719,11 +719,11 @@ class Orchestrator:
             for root in search_roots:
                 try:
                     fpath = (root / candidate).resolve()
-                    fpath.relative_to(root.resolve())
-                    if fpath.exists() and fpath.is_file():
+                    root_str = str(root.resolve()).rstrip("\\/").lower()
+                    if str(fpath).lower().startswith(root_str) and fpath.exists() and fpath.is_file():
                         resolved = fpath
                         break
-                except (ValueError, Exception):
+                except Exception:
                     pass
 
         # ── Strategy 2: fuzzy keyword match against docs folder ───────

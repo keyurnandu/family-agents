@@ -292,20 +292,25 @@ class Agent:
                     # 3. Check project docs/files first (requirements, sprint plans, etc.)
                     candidate = (project_docs_dir / req_clean).resolve()
                     try:
-                        candidate.relative_to(project_docs_dir.resolve())
-                        if candidate.exists() and candidate.is_file():
-                            raw = candidate.read_text(encoding="utf-8", errors="replace")
-                    except (ValueError, Exception):
+                        # Use string startswith instead of relative_to — more reliable
+                        # on Windows/OneDrive where path normalisation can cause relative_to
+                        # to raise ValueError even when the path is legitimately inside the root.
+                        docs_root = str(project_docs_dir.resolve()).rstrip("\\/").lower()
+                        if str(candidate).lower().startswith(docs_root):
+                            if candidate.exists() and candidate.is_file():
+                                raw = candidate.read_text(encoding="utf-8", errors="replace")
+                    except Exception:
                         pass
 
                     # 4. Fall back to loaded codebase
                     if raw is None and loaded_path:
                         try:
                             fpath = (loaded_path / req_clean).resolve()
-                            fpath.relative_to(loaded_path.resolve())
-                            if fpath.exists() and fpath.is_file():
-                                raw = fpath.read_text(encoding="utf-8", errors="replace")
-                        except (ValueError, Exception):
+                            cb_root = str(loaded_path.resolve()).rstrip("\\/").lower()
+                            if str(fpath).lower().startswith(cb_root):
+                                if fpath.exists() and fpath.is_file():
+                                    raw = fpath.read_text(encoding="utf-8", errors="replace")
+                        except Exception:
                             pass
 
                     if raw is not None:
