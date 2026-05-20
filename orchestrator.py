@@ -194,7 +194,6 @@ class Orchestrator:
         # Loaded external codebase (set by /load command)
         self.loaded_path: Path | None = None
         self.codebase_context: dict = {}
-        self.edit_mode: bool = False
 
     # ------------------------------------------------------------------
     # Helpers
@@ -454,14 +453,8 @@ class Orchestrator:
             )
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
-                if self.loaded_path and not self.edit_mode:
-                    console.print(
-                        f"[dim yellow]  ⚠ {p.get('name', role.upper())} suggested file changes — "
-                        "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
-                    )
-                else:
-                    write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
-                    prompt_and_execute(actions, write_dir)
+                write_dir = self.loaded_path if self.loaded_path else project_dir
+                prompt_and_execute(actions, write_dir)
 
             self.memory.extract_and_save_memories(response, role)
 
@@ -662,16 +655,10 @@ class Orchestrator:
                 # Permission-gated action execution
                 actions = parse_actions(response, name)
                 if actions:
-                    if self.loaded_path and not self.edit_mode:
-                        console.print(
-                            f"[dim yellow]  ⚠ {name} suggested file changes — "
-                            "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
-                        )
-                    else:
-                        write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
-                        outcomes = prompt_and_execute(actions, write_dir)
-                        if outcomes:
-                            phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                    write_dir = self.loaded_path if self.loaded_path else project_dir
+                    outcomes = prompt_and_execute(actions, write_dir)
+                    if outcomes:
+                        phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
                 # Auto-extract REMEMBER: markers
                 saved_count = self.memory.extract_and_save_memories(response, role)
@@ -824,16 +811,10 @@ class Orchestrator:
         project_dir.mkdir(parents=True, exist_ok=True)
         actions = parse_actions(response, name)
         if actions:
-            if self.loaded_path and not self.edit_mode:
-                console.print(
-                    f"[dim yellow]  ⚠ {name} suggested file changes — "
-                    "edit mode is OFF. Use [bold]/edit-mode on[/bold] to enable writes.[/dim yellow]"
-                )
-            else:
-                write_dir = self.loaded_path if (self.loaded_path and self.edit_mode) else project_dir
-                outcomes = prompt_and_execute(actions, write_dir)
-                if outcomes:
-                    response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+            write_dir = self.loaded_path if self.loaded_path else project_dir
+            outcomes = prompt_and_execute(actions, write_dir)
+            if outcomes:
+                response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
         self.memory.extract_and_save_memories(response, role)
         self.db.save_message(self.project_name, "assistant", response)
@@ -858,7 +839,6 @@ class Orchestrator:
 
         self.loaded_path = path
         self.codebase_context = ctx
-        self.edit_mode = False
 
         # Persist the path so the next session can offer to reload it
         self.memory.save_loaded_path(str(path))
@@ -881,7 +861,6 @@ class Orchestrator:
         path = self.loaded_path
         self.loaded_path = None
         self.codebase_context = {}
-        self.edit_mode = False
         self.memory.clear_loaded_path()
         console.print(f"[dim]Unloaded: {path}[/dim]\n")
 

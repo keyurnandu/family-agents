@@ -316,7 +316,6 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 if (
                     cmd_lower.startswith("/load")
                     or cmd_lower == "/unload"
-                    or cmd_lower.startswith("/edit-mode")
                 ):
                     current_project = GENERAL
                     orchestrator = _open_project(GENERAL, db, display, model)
@@ -403,26 +402,6 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
             elif cmd == "/unload":
                 orchestrator.unload_codebase()
-
-            elif parts[0] == "/edit-mode":
-                arg = parts[1].strip().lower() if len(parts) > 1 else ""
-                if arg == "on":
-                    if not orchestrator.loaded_path:
-                        console.print("[yellow]No codebase loaded. Use /load <path> first.[/yellow]")
-                    else:
-                        orchestrator.edit_mode = True
-                        console.print(
-                            f"[yellow]⚠ Edit mode ON[/yellow] — writes will go to "
-                            f"[cyan]{orchestrator.loaded_path}[/cyan]\n"
-                            "[dim]All changes are permission-prompted before execution.[/dim]\n"
-                        )
-                elif arg == "off":
-                    orchestrator.edit_mode = False
-                    console.print("[dim]Edit mode OFF — read-only.[/dim]\n")
-                else:
-                    status = "[yellow]ON[/yellow]" if orchestrator.edit_mode else "[dim]OFF[/dim]"
-                    path = orchestrator.loaded_path or "none"
-                    console.print(f"[dim]Edit mode: {status}  ·  Loaded path: {path}[/dim]")
 
             elif parts[0] == "/model":
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""

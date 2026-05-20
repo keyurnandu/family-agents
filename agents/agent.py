@@ -86,15 +86,19 @@ class Agent:
                 ]
                 for fname, content in ctx.get("key_files", {}).items():
                     codebase_lines += [f"\n### {fname}", "```", content, "```"]
-                mode_note = (
-                    "You are in READ-ONLY mode. Analyse and review only. "
-                    "Do NOT output EXEC: blocks. "
-                    "To read a specific file for deeper analysis, output READ_FILE:<relative-path> on its own line."
-                    if not edit_mode else
-                    "You are in EDIT mode. You may suggest changes via EXEC:file: blocks using paths relative to the project root. "
-                    "To read a specific file first, output READ_FILE:<relative-path>."
-                )
-                codebase_lines += ["", "### Mode", mode_note]
+                codebase_lines += [
+                    "",
+                    "### Accessing and editing files",
+                    f"The codebase is at: {loaded_path}",
+                    "To read any file inside it, output this marker on its own line:",
+                    "  READ_FILE:<relative-path-from-codebase-root>",
+                    "The Python harness (not Claude Code tools) will fetch the file and pass it back to you.",
+                    "This works for ANY file in the codebase regardless of the current working directory.",
+                    "",
+                    "To suggest file changes, output EXEC:file: blocks with paths relative to the codebase root.",
+                    "The user will be shown a compact summary and asked once whether to apply all changes.",
+                    "Do NOT worry about working directory restrictions — file writes are handled by the Python harness.",
+                ]
                 sections.append("\n".join(codebase_lines))
 
         sections.append(

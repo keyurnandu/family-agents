@@ -196,8 +196,8 @@ class Display:
             f"[bold]Tech stack:[/bold] [cyan]{tech}[/cyan]\n"
             f"[bold]Files:[/bold]      {total} total · {key_count} key files read\n\n"
             f"[bold]Structure:[/bold]\n[dim]{tree_preview}[/dim]\n\n"
-            "[dim]Mode: [bold]READ-ONLY[/bold]  —  use [bold]/edit-mode on[/bold] to enable writes\n"
-            "Agents see the full structure above. They can request specific files with READ_FILE:<path>.[/dim]",
+            "[dim]Agents can read any file with READ_FILE:<path>.\n"
+            "If they suggest changes you'll be asked once before anything is written.[/dim]",
             title="[bold]Codebase Loaded[/bold]",
             border_style="green",
             padding=(1, 2),
@@ -277,7 +277,6 @@ class Display:
             "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
-            "  [cyan]/edit-mode on|off[/cyan]  Enable/disable writes to the loaded codebase\n"
             "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"
             "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs\n"
             "  [cyan]/project[/cyan]           Show current project info\n"

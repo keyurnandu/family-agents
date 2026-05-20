@@ -150,7 +150,6 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` |
 | `/load <path>` | Load an existing codebase for review or editing |
 | `/unload` | Unload the current codebase |
-| `/edit-mode on\|off` | Enable or disable writes to the loaded codebase |
 | `/help` | Show full help |
 | `/quit` | Exit |
 
@@ -299,16 +298,20 @@ You: explain what the database migration scripts do
 
 The agent will read the file on demand and explain it in context.
 
-### Edit mode
+### Applying changes
 
-By default the codebase is **read-only** — agents can analyse and suggest, but nothing is written. When you're ready to apply changes:
+When an agent suggests file changes, you see a compact summary and a single prompt:
 
-```bash
-/edit-mode on    # allow agents to write to the loaded codebase
-/edit-mode off   # back to read-only
+```
+Sam wants to write 3 files to C:\projects\my-app:
+  ✏  playwright_runner.py    (142 lines)  from app.core.config import…
+  ✏  app/core/config.py      (28 lines)   from pydantic_settings import…
+  ✏  requirements.txt        (12 lines)   fastapi==0.111.0…
+
+  Apply all changes? [y/N]:
 ```
 
-With edit mode on, agents write files using the same permission-prompted flow as normal project files — you approve each write before it happens.
+**y** applies everything at once. **n** discards all. No per-file drilling — just one decision.
 
 ### Memory across sessions
 
@@ -326,7 +329,7 @@ Any decisions, notes, or architectural discussions from previous sessions are al
 
 ### Unload
 
-```bash
+```
 /unload    # removes the codebase from the team's context and clears the saved path
 ```
 
