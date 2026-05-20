@@ -182,6 +182,24 @@ You: write a technical spec
 
 Each document is written by the most relevant agent (BSA for requirements, Lead for architecture, PM for sprint plans, etc.), saved as `docs/<type>-<date>.md`, and a preview is shown in the terminal.
 
+### Picking up where you left off
+
+After a document is exported, two things happen automatically:
+
+1. **Compact summary saved to memory** — key epics, stories, decisions extracted as bullet points and saved to project memory. Persists across sessions.
+2. **Full doc loaded into agent context** — on every subsequent session, the 3 most recent docs are injected directly into each agent's system prompt.
+
+This means in a new session the team already knows your requirements, epics, and sprint plan — they won't re-analyse or ask again. They pick up and keep working:
+
+```
+New session, project: my-app
+You: implement the login epic from the requirements
+
+→ Sam already has the full requirements doc
+→ Knows: Epic 1 = Authentication (login, register, password reset)
+→ Goes straight to implementation, no re-discovery
+```
+
 ---
 
 ## Project Status

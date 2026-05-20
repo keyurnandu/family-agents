@@ -116,6 +116,50 @@ class MemoryManager:
         if memory_file.exists():
             memory_file.unlink()
 
+    def load_project_docs(self, max_docs: int = 3, max_chars_each: int = 1500) -> str:
+        """
+        Load the most recently exported docs from projects/<name>/docs/.
+        Returns a combined string injected into agent system prompts so agents
+        start a new session already aware of requirements, epics, sprint plans, etc.
+        Capped to avoid excessive token usage — full docs always on disk.
+        """
+        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
+        if not docs_dir.exists():
+            return ""
+
+        doc_files = sorted(
+            docs_dir.glob("*.md"),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if not doc_files:
+            return ""
+
+        parts = []
+        for doc_file in doc_files[:max_docs]:
+            try:
+                content = doc_file.read_text(encoding="utf-8", errors="replace")
+                if len(content) > max_chars_each:
+                    content = (
+                        content[:max_chars_each]
+                        + f"\n\n[Truncated — {len(content):,} chars total. Full doc at docs/{doc_file.name}]"
+                    )
+                parts.append(f"### {doc_file.name}\n{content.strip()}")
+            except Exception:
+                pass
+
+        if not parts:
+            return ""
+
+        total = len(doc_files)
+        shown = min(total, max_docs)
+        header = (
+            f"The team has produced {total} document(s) for this project "
+            f"(showing {shown} most recent). Treat these as the source of truth — "
+            "do NOT re-analyse or re-discover what is already defined here.\n\n"
+        )
+        return header + "\n\n---\n\n".join(parts)
+
     # ------------------------------------------------------------------
     # Loaded codebase path — persists across sessions
     # ------------------------------------------------------------------

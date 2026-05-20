@@ -104,7 +104,7 @@ ROUTING_SCHEMA = {
                         "type": "string",
                         "enum": [
                             "decision", "requirement", "technical",
-                            "constraint", "assumption", "stakeholder",
+                            "constraint", "assumption", "stakeholder", "document",
                         ],
                     },
                 },
@@ -315,6 +315,7 @@ class Orchestrator:
         project_memory = self.memory.load_project_memory(
             limit=self.config.get("max_memory_entries", 40)
         )
+        project_docs = self.memory.load_project_docs()
 
         team_lines = [
             f"- {role} ({self.config['agent_personas'].get(role, {}).get('name', role)}): "
@@ -331,6 +332,8 @@ class Orchestrator:
             f"{role_memory}\n\n"
             f"## Project: {self.project_name}\n\n"
             f"## Project Memory\n{project_memory or 'None yet.'}\n\n"
+            + (f"## Project Documents\n{project_docs}\n\n" if project_docs else "")
+            +
             f"## Active Team\n" + "\n".join(team_lines) + "\n\n"
             f"## Available to Add\n{', '.join(available) or 'All agents active.'}\n\n"
             "## Routing Instructions\n"
@@ -1060,12 +1063,31 @@ class Orchestrator:
             f"\n[green]✓ Saved:[/green] [cyan]projects/{self.project_name}/docs/{filename}[/cyan]\n"
         )
 
-        # Save to memory
-        self.memory.save_project_memory(
-            content=f"Generated {doc_type} → docs/{filename}",
-            category="decision",
-            source=role,
-        )
+        # Save a compact summary to memory so future sessions know what's defined
+        try:
+            summary_prompt = (
+                f"This is a {doc_type} document. Extract the most important items as "
+                f"4-8 bullet points (epics, user stories, key decisions, scope, tech choices — "
+                f"whatever matters most). Each bullet max 90 chars. Start each with •\n\n"
+                f"Document:\n{content[:5000]}"
+            )
+            summary = call_claude(
+                prompt=summary_prompt,
+                system_prompt="You write concise document summaries. Output bullet points only, no intro text.",
+                model=self.model,
+            )
+            self.memory.save_project_memory(
+                content=f"Document: {doc_type} ({filename})\n{summary}",
+                category="document",
+                source="export",
+            )
+        except Exception:
+            # Summary is nice-to-have — don't fail the export if it errors
+            self.memory.save_project_memory(
+                content=f"Generated {doc_type} → docs/{filename}",
+                category="document",
+                source="export",
+            )
 
     def add_agent(self, role: str):
         p = self.config["agent_personas"]

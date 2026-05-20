@@ -68,6 +68,14 @@ class Agent:
         if skills_text:
             sections.append(f"## Additional Skills & Expertise\n{skills_text}")
 
+        # Inject previously exported project documents (requirements, sprint plans, etc.)
+        docs_text = self.memory.load_project_docs()
+        if docs_text:
+            sections.append(
+                "## Project Documents\n"
+                + docs_text
+            )
+
         # Inject loaded codebase context
         if self.orchestrator:
             loaded_path = getattr(self.orchestrator, "loaded_path", None)
