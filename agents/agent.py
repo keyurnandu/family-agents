@@ -260,12 +260,16 @@ class Agent:
                 _disk_cache: dict[str, str] = {}  # dedup: avoid re-reading same file twice
 
                 # Raise the limit when the task explicitly asks for the full/entire file
+                # OR when the task is a review/audit — reviews need the whole file to be useful.
                 _FULL_RE = re.compile(
-                    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in)\b",
+                    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in|"
+                    r"review|audit|check|analyse|analyze|inspect|examine|read\s+through)\b",
                     re.IGNORECASE,
                 )
                 want_full = bool(_FULL_RE.search(task))
-                READ_FILE_LIMIT = None if want_full else 8000
+                cfg = getattr(self.orchestrator, "config", {}) if self.orchestrator else {}
+                _default_limit = cfg.get("max_read_file_chars", 20_000)
+                READ_FILE_LIMIT = None if want_full else _default_limit
 
                 project_docs_dir = self.base_dir / "projects" / self.memory.project_name
 

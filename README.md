@@ -332,7 +332,7 @@ Works with intent words: `read`, `show`, `display`, `view`, `open`, `print`, `ca
 - Default cap: **20,000 chars**. Anything larger shows a truncation note.
 - Add `full` / `entire` / `complete` to remove the cap entirely.
 
-For agents doing work (e.g. "work on Epic 1"), they read files mid-task via `READ_FILE:<path>`. Those reads are capped at 8,000 chars unless the task explicitly asks for the full file.
+For agents doing work (e.g. "work on Epic 1"), they read files mid-task via `READ_FILE:<path>`. Reads are capped at `max_read_file_chars` (default 20,000). Review, audit, and analysis tasks automatically get the full file with no cap — the agent needs everything to give useful feedback.
 
 ### Applying changes
 
@@ -601,6 +601,7 @@ max_memory_entries: 15   # memory entries injected into agent prompts (full hist
 max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)
 max_project_docs: 1      # docs injected into agent prompts (most recent only; full docs on disk)
 max_doc_chars: 1500      # chars per injected doc (say 'show full <doc>.md' to see complete file)
+max_read_file_chars: 20000  # chars per READ_FILE request; review/audit tasks always get the full file
 
 team:
   default_roster: [pm, bsa, developer, lead]
