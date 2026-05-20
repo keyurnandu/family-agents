@@ -241,12 +241,19 @@ class Orchestrator:
         tree_lines = [f"{path.name}/"] + build_tree(path)
         structure_tree = "\n".join(tree_lines[:100])
 
+        KEY_FILE_LIMIT = 4000   # chars — enough for most config/manifest files
+        ENTRY_POINT_LIMIT = 3000  # chars — enough for a typical entry point
+
         key_file_contents: dict[str, str] = {}
         for fname in KEY_FILES:
             fpath = path / fname
             if fpath.exists() and fpath.is_file():
                 try:
-                    key_file_contents[fname] = fpath.read_text(encoding="utf-8", errors="replace")[:2000]
+                    raw = fpath.read_text(encoding="utf-8", errors="replace")
+                    if len(raw) > KEY_FILE_LIMIT:
+                        key_file_contents[fname] = raw[:KEY_FILE_LIMIT] + f"\n\n[File truncated — {len(raw):,} chars total. Use READ_FILE:{fname} for the full content.]"
+                    else:
+                        key_file_contents[fname] = raw
                 except Exception:
                     pass
 
@@ -254,7 +261,11 @@ class Orchestrator:
             ep_path = path / ep
             if ep_path.exists() and ep_path.is_file() and ep not in key_file_contents:
                 try:
-                    key_file_contents[ep] = ep_path.read_text(encoding="utf-8", errors="replace")[:1500]
+                    raw = ep_path.read_text(encoding="utf-8", errors="replace")
+                    if len(raw) > ENTRY_POINT_LIMIT:
+                        key_file_contents[ep] = raw[:ENTRY_POINT_LIMIT] + f"\n\n[File truncated — {len(raw):,} chars total. Use READ_FILE:{ep} for the full content.]"
+                    else:
+                        key_file_contents[ep] = raw
                 except Exception:
                     pass
                 break

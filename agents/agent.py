@@ -174,14 +174,22 @@ class Agent:
                 read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
                 if read_requests:
                     file_contents: dict[str, str] = {}
+                    READ_FILE_LIMIT = 8000  # chars — generous for a targeted file read
                     for req in read_requests[:5]:  # cap at 5 files per response
                         fpath = (loaded_path / req.strip()).resolve()
                         # Safety: only read files inside the loaded path
                         try:
                             fpath.relative_to(loaded_path)
                             if fpath.exists() and fpath.is_file():
-                                content = fpath.read_text(encoding="utf-8", errors="replace")
-                                file_contents[req.strip()] = content[:3000]
+                                raw = fpath.read_text(encoding="utf-8", errors="replace")
+                                if len(raw) > READ_FILE_LIMIT:
+                                    file_contents[req.strip()] = (
+                                        raw[:READ_FILE_LIMIT]
+                                        + f"\n\n[File truncated — {len(raw):,} chars total. "
+                                        "Request a specific section or line range if you need more.]"
+                                    )
+                                else:
+                                    file_contents[req.strip()] = raw
                         except (ValueError, Exception):
                             pass
                     if file_contents:
