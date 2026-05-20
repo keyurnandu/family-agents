@@ -60,7 +60,12 @@ class Agent:
             "Do NOT attempt to call any tools. "
             "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
             "none of that applies here. "
-            "The ONLY way to deliver files or run commands is via EXEC: tagged blocks in your text.",
+            "The ONLY way to deliver files or run commands is via EXEC: tagged blocks in your text.\n\n"
+            "BREVITY RULE: Never reproduce or reprint document content that is already in your context. "
+            "When asked about a document, sprint, epics, or stories — respond with a SHORT summary "
+            "(3–6 bullets max) and ask what to do next. Only provide full details when the user "
+            "explicitly requests them (e.g. 'show me all stories in Epic 2'). "
+            "Violating this rule wastes tokens and creates noise.",
 
             role_memory,
             project_section,
@@ -237,7 +242,9 @@ class Agent:
                         f"{prompt}\n\n"
                         "You requested these files. Here are their contents:\n\n"
                         f"{file_ctx}\n\n"
-                        "Now provide your complete analysis/response."
+                        "IMPORTANT: Do NOT reproduce or reprint this content. "
+                        "Give a SHORT response — 3 to 6 bullet points maximum. "
+                        "Summarise what exists, confirm you have it, and ask what to do next."
                     )
                     try:
                         response = call_claude(
