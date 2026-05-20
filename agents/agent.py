@@ -326,13 +326,35 @@ class Agent:
                         f"### {fname}\n```\n{content}\n```"
                         for fname, content in file_contents.items()
                     )
+                    # Detect intent: implementation tasks should proceed with EXEC blocks,
+                    # not summarise and stop. Read/review tasks get the short-summary instruction.
+                    _IMPL_RE = re.compile(
+                        r"\b(?:implement|write|create|build|add|fix|refactor|update|modify|"
+                        r"change|work\s+on|complete|finish|do|start|begin|tackle|"
+                        r"epic|story|sprint|feature)\b",
+                        re.IGNORECASE,
+                    )
+                    is_impl_task = bool(_IMPL_RE.search(task))
+
+                    if is_impl_task:
+                        follow_up_instruction = (
+                            "You now have the full file context you requested. "
+                            "Do NOT summarise or reproduce the file contents. "
+                            "Proceed IMMEDIATELY with the implementation — output all required "
+                            "EXEC:file: blocks now. Do not ask for confirmation or say 'stand by'."
+                        )
+                    else:
+                        follow_up_instruction = (
+                            "IMPORTANT: Do NOT reproduce or reprint this content. "
+                            "Give a SHORT response — 3 to 6 bullet points maximum. "
+                            "Summarise what you found and ask what to do next."
+                        )
+
                     follow_up = (
                         f"{prompt}\n\n"
                         "You requested these files. Here are their contents:\n\n"
                         f"{file_ctx}\n\n"
-                        "IMPORTANT: Do NOT reproduce or reprint this content. "
-                        "Give a SHORT response — 3 to 6 bullet points maximum. "
-                        "Summarise what exists, confirm you have it, and ask what to do next."
+                        f"{follow_up_instruction}"
                     )
                     try:
                         response = call_claude(
