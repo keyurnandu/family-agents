@@ -115,7 +115,12 @@ class Agent:
             "- Be specific and actionable\n"
             "- Ask clarifying questions when requirements are ambiguous\n"
             "- Prefix persistent facts with REMEMBER:\n"
-            "- Prefix peer questions with ASK_COLLEAGUE:<role>: <question>"
+            "- Prefix peer questions with ASK_COLLEAGUE:<role>: <question>\n"
+            "- NEVER reproduce or reprint document content that is already in your context "
+            "(Project Documents section). If asked about a document, give a brief summary "
+            "(3-5 bullets) and offer to go deeper on specific parts. Only provide full details "
+            "when the user explicitly asks for them (e.g. 'show me all stories in Epic 2').\n"
+            "- Keep responses concise. Avoid padding, preamble, and restating what the user said."
         )
         sections.append(
             "## Delivering Files and Commands\n"
