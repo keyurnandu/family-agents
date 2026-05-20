@@ -83,7 +83,12 @@ class MemoryManager:
 
     def list_memory_entries(self) -> list[dict]:
         """Return parsed memory entries as a list of dicts."""
-        content = self.load_project_memory()
+        # Read the raw file directly — do NOT call load_project_memory() here
+        # as that method calls list_memory_entries() and would cause infinite recursion.
+        memory_file = self.dynamic_dir / "memory.md"
+        if not memory_file.exists():
+            return []
+        content = memory_file.read_text(encoding="utf-8")
         if not content:
             return []
 
