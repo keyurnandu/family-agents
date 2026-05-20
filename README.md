@@ -305,16 +305,23 @@ You: how does the authentication flow work?
 
 If an agent needs to go deeper into a specific file, it requests it automatically with `READ_FILE:<path>` — no action needed from you.
 
-### Deep dives on specific files
+### Reading files instantly
 
-You can also ask directly:
+Simple file-read requests are served directly from disk — **zero LLM calls**, instant response:
 
 ```
-You: @sam walk me through src/auth/middleware.ts
-You: explain what the database migration scripts do
+You: show config.py
+You: read sprint.md
+You: display src/auth/middleware.ts
+You: show full requirements.txt      ← no truncation, complete file
 ```
 
-The agent will read the file on demand and explain it in context.
+Works with: `read`, `show`, `display`, `view`, `open`, `print`, `cat`, `get`, `fetch`, `see` + any filename with an extension. The file is shown with syntax highlighting and line numbers.
+
+- Default cap: **20,000 chars**. Anything larger shows a note at the bottom.
+- Add `full` / `entire` / `complete` to the request to remove the cap entirely.
+
+For agents doing work (e.g. "work on Epic 1"), they can still request files mid-task with `READ_FILE:<path>`. Those reads are capped at 8,000 chars unless the task explicitly asks for the full file.
 
 ### Applying changes
 
@@ -533,6 +540,17 @@ Use `/status` for a full breakdown with a visual bar.
 2. **Multi-agent phases** — a 4-agent response = 4 full system prompts + 1 routing call + 1 synthesis call. Single-agent @mentions are far cheaper.
 3. **Project memory growth** — by default agents only see the last 40 memory entries (full history stays on disk). Tune with `max_memory_entries` in `config/settings.yaml`.
 4. **Long conversation history** — tune `max_history_messages` in `config/settings.yaml` (default: 10).
+
+### Zero-cost operations
+
+These bypass the LLM pipeline entirely:
+
+| Request | Cost |
+|---|---|
+| `show config.py` / `read sprint.md` | 0 LLM calls — served direct from disk |
+| `show full requirements.txt` | 0 LLM calls — full file, no truncation |
+| `/memory`, `/history`, `/status`, `/team` | 0 LLM calls — local data only |
+| `/export <type>` | 1 LLM call (the doc writer), no routing or synthesis |
 
 ### Routing speed
 
