@@ -288,7 +288,7 @@ class Agent:
                     # 3. Check project docs/files first (requirements, sprint plans, etc.)
                     candidate = (project_docs_dir / req_clean).resolve()
                     try:
-                        candidate.relative_to(project_docs_dir)
+                        candidate.relative_to(project_docs_dir.resolve())
                         if candidate.exists() and candidate.is_file():
                             raw = candidate.read_text(encoding="utf-8", errors="replace")
                     except (ValueError, Exception):
@@ -298,7 +298,7 @@ class Agent:
                     if raw is None and loaded_path:
                         try:
                             fpath = (loaded_path / req_clean).resolve()
-                            fpath.relative_to(loaded_path)
+                            fpath.relative_to(loaded_path.resolve())
                             if fpath.exists() and fpath.is_file():
                                 raw = fpath.read_text(encoding="utf-8", errors="replace")
                         except (ValueError, Exception):
@@ -374,32 +374,23 @@ class Agent:
                         pass  # keep original response
 
                 elif read_requests:
-                    # READ_FILE was requested but NO files were found — give the agent
-                    # a clear error so it can tell the user what to do, instead of
-                    # returning raw READ_FILE markers that confuse Aria's synthesis.
+                    # READ_FILE was requested but NO files were found.
+                    # Return a direct plain-text message — NO LLM call here.
+                    # An LLM call at this point produces "sandbox wall" hallucinations.
                     not_found = ", ".join(r.strip() for r in read_requests[:5])
                     loaded = getattr(self.orchestrator, "loaded_path", None) if self.orchestrator else None
                     if loaded:
-                        reason = (
-                            f"The codebase at `{loaded}` is loaded, but these paths were not found "
-                            f"inside it: {not_found}. The paths may be wrong — check the folder "
-                            "structure and try READ_FILE with the correct relative paths."
+                        response = (
+                            f"I couldn't find the requested file(s): `{not_found}`.\n\n"
+                            f"The codebase is loaded at `{loaded}` — but those paths don't exist inside it. "
+                            "Please check the path is correct relative to the codebase root, then try again."
                         )
                     else:
-                        reason = (
-                            f"No codebase is currently loaded. You requested: {not_found}. "
-                            "Tell the customer to use the `/load <path>` command to point the team "
-                            "at their project directory, then the team can read the files."
+                        response = (
+                            f"No codebase is currently loaded — I couldn't read `{not_found}`.\n\n"
+                            "Use `/load <path>` to point the team at your project directory, "
+                            "then ask your question again."
                         )
-                    error_follow_up = f"{prompt}\n\n{reason}\n\nRespond with a clear, concise message to the customer explaining the situation."
-                    try:
-                        response = call_claude(
-                            prompt=error_follow_up,
-                            system_prompt=system_prompt,
-                            model=self.model,
-                        )
-                    except Exception:
-                        pass
 
         # Handle ASK_COLLEAGUE markers (one round only)
         colleagues_needed = re.findall(
