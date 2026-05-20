@@ -198,7 +198,15 @@ class Agent:
             read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
             if read_requests:
                 file_contents: dict[str, str] = {}
-                READ_FILE_LIMIT = 8000  # chars — generous for a targeted file read
+
+                # Raise the limit when the task explicitly asks for the full/entire file
+                _FULL_RE = re.compile(
+                    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in)\b",
+                    re.IGNORECASE,
+                )
+                want_full = bool(_FULL_RE.search(task))
+                READ_FILE_LIMIT = None if want_full else 8000
+
                 project_docs_dir = self.base_dir / "projects" / self.memory.project_name
 
                 for req in read_requests[:5]:  # cap at 5 files per response
@@ -225,11 +233,11 @@ class Agent:
                             pass
 
                     if raw is not None:
-                        if len(raw) > READ_FILE_LIMIT:
+                        if READ_FILE_LIMIT and len(raw) > READ_FILE_LIMIT:
                             file_contents[req_clean] = (
                                 raw[:READ_FILE_LIMIT]
                                 + f"\n\n[File truncated — {len(raw):,} chars total. "
-                                "Request a specific section or line range if you need more.]"
+                                "Say 'show full <filename>' for the complete file.]"
                             )
                         else:
                             file_contents[req_clean] = raw

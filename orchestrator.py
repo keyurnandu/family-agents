@@ -129,6 +129,21 @@ ROUTING_SCHEMA = {
     "required": ["phases"],
 }
 
+# Patterns that signal a direct file-read request — served without any LLM calls
+# Only triggers when the message contains a filename with an extension (e.g. config.py, sprint.md)
+_FILE_READ_INTENT_RE = re.compile(
+    r"\b(?:read|show|display|view|open|print|cat|get|fetch|see)\b",
+    re.IGNORECASE,
+)
+_FILE_PATH_IN_MSG_RE = re.compile(
+    r"(?:^|\s)[`'\"]?([\w./\\-]+\.\w{1,8})[`'\"]?(?:\s|$|\?)",
+)
+# Words that signal the user wants the FULL file (no truncation)
+_FULL_FILE_RE = re.compile(
+    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in)\b",
+    re.IGNORECASE,
+)
+
 # Patterns that signal the user wants to teach an agent a new skill
 _TEACH_PATTERNS = [
     (r"(?:please\s+)?teach\s+(?:the\s+)?(\w+)(?:\s+team)?\s+(.+)", 1, 2),
@@ -575,10 +590,97 @@ class Orchestrator:
             }
 
     # ------------------------------------------------------------------
+    # Direct file-serve shortcut (zero LLM calls for simple read requests)
+    # ------------------------------------------------------------------
+
+    def _try_serve_file_directly(self, user_input: str) -> bool:
+        """
+        If the message is a simple 'read/show <filename>' request and the file
+        can be found in the loaded codebase or project docs, display it instantly
+        without any LLM calls and return True. Otherwise return False.
+        """
+        if not _FILE_READ_INTENT_RE.search(user_input):
+            return False
+        path_match = _FILE_PATH_IN_MSG_RE.search(user_input)
+        if not path_match:
+            return False
+
+        candidate = path_match.group(1).strip().strip("`'\"")
+        want_full = bool(_FULL_FILE_RE.search(user_input))
+
+        # Search order: project docs dir → loaded codebase
+        search_roots = []
+        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
+        if docs_dir.exists():
+            search_roots.append(docs_dir)
+        if self.loaded_path:
+            search_roots.append(self.loaded_path)
+
+        resolved = None
+        for root in search_roots:
+            try:
+                fpath = (root / candidate).resolve()
+                fpath.relative_to(root.resolve())  # safety: must stay inside root
+                if fpath.exists() and fpath.is_file():
+                    resolved = fpath
+                    break
+            except (ValueError, Exception):
+                pass
+
+        if resolved is None:
+            return False  # file not found — fall through to normal LLM routing
+
+        # Read content — full if user asked for it, else cap at 20 000 chars
+        try:
+            content = resolved.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return False
+
+        DISPLAY_LIMIT = None if want_full else 20_000
+        truncated = False
+        if DISPLAY_LIMIT and len(content) > DISPLAY_LIMIT:
+            content = content[:DISPLAY_LIMIT]
+            truncated = True
+
+        from rich.syntax import Syntax
+        suffix = resolved.suffix.lstrip(".") or "text"
+        rel = resolved.relative_to(search_roots[search_roots.index(
+            next(r for r in search_roots if resolved.is_relative_to(r))
+        )]) if any(resolved.is_relative_to(r) for r in search_roots) else resolved.name
+
+        console.print(f"\n[dim]📄  {rel}[/dim]")
+        console.print(Syntax(content, suffix, theme="monokai", line_numbers=True))
+        if truncated:
+            console.print(
+                f"[dim yellow]  ⚠ Showing first {DISPLAY_LIMIT:,} chars of "
+                f"{len(resolved.read_text(encoding='utf-8', errors='replace')):,}. "
+                "Say 'show full <filename>' to see everything.[/dim yellow]"
+            )
+        console.print()
+
+        # Persist to conversation so history stays coherent
+        self.db.save_message(self.project_name, "user", user_input)
+        self.db.save_message(
+            self.project_name, "assistant",
+            f"[Direct file read: {resolved.name} — {len(content):,} chars displayed]",
+        )
+        self.messages.append({"role": "user", "content": user_input})
+        self.messages.append({
+            "role": "assistant",
+            "content": f"[Served {resolved.name} directly from disk]",
+        })
+        return True
+
+    # ------------------------------------------------------------------
     # Main entry: process one user message
     # ------------------------------------------------------------------
 
     def process(self, user_input: str):
+        # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
+        # _try_serve_file_directly also writes to db/messages, so return immediately.
+        if self._try_serve_file_directly(user_input):
+            return
+
         self.db.save_message(self.project_name, "user", user_input)
         self.messages.append({"role": "user", "content": user_input})
 
