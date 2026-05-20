@@ -373,6 +373,34 @@ class Agent:
                     except Exception:
                         pass  # keep original response
 
+                elif read_requests:
+                    # READ_FILE was requested but NO files were found — give the agent
+                    # a clear error so it can tell the user what to do, instead of
+                    # returning raw READ_FILE markers that confuse Aria's synthesis.
+                    not_found = ", ".join(r.strip() for r in read_requests[:5])
+                    loaded = getattr(self.orchestrator, "loaded_path", None) if self.orchestrator else None
+                    if loaded:
+                        reason = (
+                            f"The codebase at `{loaded}` is loaded, but these paths were not found "
+                            f"inside it: {not_found}. The paths may be wrong — check the folder "
+                            "structure and try READ_FILE with the correct relative paths."
+                        )
+                    else:
+                        reason = (
+                            f"No codebase is currently loaded. You requested: {not_found}. "
+                            "Tell the customer to use the `/load <path>` command to point the team "
+                            "at their project directory, then the team can read the files."
+                        )
+                    error_follow_up = f"{prompt}\n\n{reason}\n\nRespond with a clear, concise message to the customer explaining the situation."
+                    try:
+                        response = call_claude(
+                            prompt=error_follow_up,
+                            system_prompt=system_prompt,
+                            model=self.model,
+                        )
+                    except Exception:
+                        pass
+
         # Handle ASK_COLLEAGUE markers (one round only)
         colleagues_needed = re.findall(
             r"ASK_COLLEAGUE:(\w+):\s*(.+?)(?=\nASK_COLLEAGUE:|$)", response, re.DOTALL
