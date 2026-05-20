@@ -49,13 +49,15 @@ def call_claude(
     if system_prompt:
         cmd += ["--system-prompt", system_prompt]
 
-    cmd.append(prompt)
-
+    # Pass the prompt via stdin, NOT as a command-line argument.
+    # Windows CreateProcess has a hard 32,767-char command-line limit — any
+    # prompt containing file contents will exceed it and silently fail.
+    # Stdin has no length limit and is the correct way to pipe large prompts.
     _session_stats["input_chars"] += len(prompt) + len(system_prompt or "")
 
     result = subprocess.run(
         cmd,
-        stdin=subprocess.DEVNULL,   # never consume terminal stdin
+        input=prompt,               # prompt → stdin (no size limit)
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
