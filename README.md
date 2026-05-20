@@ -334,6 +334,8 @@ Works with intent words: `read`, `show`, `display`, `view`, `open`, `print`, `ca
 
 For agents doing work (e.g. "work on Epic 1"), they read files mid-task via `READ_FILE:<path>`. Reads are capped at `max_read_file_chars` (default 20,000). Review, audit, and analysis tasks automatically get the full file with no cap — the agent needs everything to give useful feedback.
 
+The team sees your folder structure to **depth 3** (e.g. `app/services/runner/`) so they can reference deep files by their actual path. If a path is slightly off, a filename fuzzy search finds the right file automatically.
+
 ### Applying changes
 
 When an agent suggests file changes, you see a compact summary with diff stats and a single prompt:
