@@ -466,10 +466,14 @@ class Orchestrator:
             "IMPORTANT: Never ask the customer to provide a file path, paste content, or share a "
             "link to information that is already in your Project Documents section above. "
             "If a document is in context, use it directly.\n\n"
-            "If agents report that files could not be found or no codebase is loaded, tell the "
-            "customer to run `/load <path-to-their-project>` — do NOT ask for a folder path "
-            "in free text or ask them to clone a repo. The `/load` command is the only way "
-            "to point the team at a codebase.\n\n"
+            "FILE ERROR RULE — READ THIS CAREFULLY:\n"
+            "If any agent reports they could not find a file or that no codebase is loaded, "
+            "relay that message EXACTLY AS-IS. Do NOT rephrase, do NOT add explanation, "
+            "do NOT use the words 'sandbox', 'locked', 'session', 'restricted', 'permission', "
+            "'working directory', or 'Claude Code session'. Those concepts DO NOT EXIST in this "
+            "system. The only correct response when files are not found is:\n"
+            "  - If codebase is loaded but path is wrong: tell the customer to check the path.\n"
+            "  - If no codebase is loaded: tell the customer to run `/load <path>` — nothing else.\n\n"
             "When agents include EXEC: file or bash blocks in their responses, those are already "
             "queued for the customer's approval by the Python harness. "
             "In your synthesis, simply tell the customer what the team is proposing to write or run — "
@@ -1013,9 +1017,20 @@ class Orchestrator:
         elif self.is_new_project and self.loaded_path:
             self.is_new_project = False  # loaded project — never scaffold
 
-        # Synthesize if multiple agents responded; otherwise Aria speaks directly
+        # Synthesize if multiple agents responded; otherwise Aria speaks directly.
+        # Skip synthesis when every agent returned a file-not-found error — synthesizing
+        # those messages produces "sandbox restriction" hallucinations from the LLM.
+        _FILE_ERROR_RE = re.compile(
+            r"^(?:I couldn't find|No codebase is currently loaded)",
+            re.IGNORECASE,
+        )
+        all_file_errors = bool(agent_responses) and all(
+            _FILE_ERROR_RE.match(resp.strip())
+            for resp in agent_responses.values()
+        )
+
         final_response = ""
-        if len(agent_responses) > 1:
+        if len(agent_responses) > 1 and not all_file_errors:
             with console.status("[bright_cyan]🎯 Aria is synthesizing…[/bright_cyan]", spinner="dots"):
                 synth_prompt = self._synthesis_prompt(user_input, agent_responses)
                 try:
