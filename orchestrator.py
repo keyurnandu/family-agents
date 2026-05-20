@@ -643,17 +643,19 @@ class Orchestrator:
         want_full = bool(_FULL_FILE_RE.search(user_input))
         docs_dir = self.base_dir / "projects" / self.project_name / "docs"
 
+        # Build search roots once — used by both strategies and the display block
+        search_roots = []
+        if docs_dir.exists():
+            search_roots.append(docs_dir)
+        if self.loaded_path:
+            search_roots.append(self.loaded_path)
+
         resolved = None
 
         # ── Strategy 1: exact path/filename with extension ────────────
         path_match = _FILE_PATH_IN_MSG_RE.search(user_input)
         if path_match:
             candidate = path_match.group(1).strip().strip("`'\"")
-            search_roots = []
-            if docs_dir.exists():
-                search_roots.append(docs_dir)
-            if self.loaded_path:
-                search_roots.append(self.loaded_path)
             for root in search_roots:
                 try:
                     fpath = (root / candidate).resolve()
