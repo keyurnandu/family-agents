@@ -326,22 +326,30 @@ class Agent:
                         f"### {fname}\n```\n{content}\n```"
                         for fname, content in file_contents.items()
                     )
-                    # Detect intent: implementation tasks should proceed with EXEC blocks,
-                    # not summarise and stop. Read/review tasks get the short-summary instruction.
+                    # Detect intent: implementation tasks must output EXEC blocks now.
+                    # Read/review tasks get the short-summary instruction.
                     _IMPL_RE = re.compile(
                         r"\b(?:implement|write|create|build|add|fix|refactor|update|modify|"
-                        r"change|work\s+on|complete|finish|do|start|begin|tackle|"
-                        r"epic|story|sprint|feature)\b",
+                        r"change|work\s+on|complete|finish|do|start|begin|tackle|wire|"
+                        r"integrate|connect|hook\s+up|configure|set\s+up|apply|generate|"
+                        r"epic|story|sprint|feature|us-e\d|e\d-\d)\b",
                         re.IGNORECASE,
                     )
                     is_impl_task = bool(_IMPL_RE.search(task))
 
                     if is_impl_task:
                         follow_up_instruction = (
-                            "You now have the full file context you requested. "
-                            "Do NOT summarise or reproduce the file contents. "
-                            "Proceed IMMEDIATELY with the implementation — output all required "
-                            "EXEC:file: blocks now. Do not ask for confirmation or say 'stand by'."
+                            "You now have the full file context. "
+                            "THIS IS YOUR ONLY TURN TO WRITE CODE — there is no follow-up. "
+                            "Rules:\n"
+                            "- Do NOT say 'I will implement', 'stand by', 'here is the plan', "
+                            "or any variant — that wastes the turn.\n"
+                            "- Do NOT summarise or reproduce file contents.\n"
+                            "- OUTPUT THE ACTUAL CODE NOW using EXEC:file: blocks.\n"
+                            "- Every file that needs changing must have its own EXEC:file: block "
+                            "with the COMPLETE new content.\n"
+                            "- If you do not output EXEC:file: blocks in this response, "
+                            "nothing will be written and the task fails."
                         )
                     else:
                         follow_up_instruction = (
