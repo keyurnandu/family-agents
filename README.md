@@ -266,7 +266,7 @@ Point the team at any existing project on your machine — they'll scan it, unde
 /load C:\Users\you\OneDrive\Desktop\my-backend    ← OneDrive paths work fine
 ```
 
-There is **no filesystem sandbox** — Python has full read/write access to any path on your machine. `/load` simply tells the team *where to look*. Without it, agents don't know which directory to search, so they'll ask you to run `/load <path>` first.
+There is **no filesystem sandbox** — Python has full read/write access to any path on your machine. `/load` simply tells the team *where to look*. Once loaded, the path is saved and **auto-reloaded every session** so you never have to run `/load` again for the same project.
 
 On load, the team automatically:
 - Builds a depth-2 folder tree of the project
@@ -367,9 +367,9 @@ Last session had /path/to/my-app loaded — reload it? [y/N]
 - **n** (default) — skipped; use `/load` again anytime
 - If the path no longer exists (moved or deleted), the reference is silently cleared
 
-> **Important:** The default is N. If you just press Enter, the codebase is not reloaded and agents won't be able to read your files. Always press **y** when resuming a coding session.
+The codebase is **reloaded automatically** every time you open the project — no prompt, no keypress needed. If the path no longer exists (moved or deleted) the reference is silently cleared.
 
-Any decisions, notes, or architectural discussions from previous sessions are already in project memory — even after a reload, the team has full context.
+Any decisions, notes, or architectural discussions from previous sessions are already in project memory — the team picks up exactly where you left off.
 
 ### Unload
 
