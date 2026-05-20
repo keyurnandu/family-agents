@@ -398,7 +398,10 @@ class Orchestrator:
             "for document questions, and never assign more than one agent to a simple read request.\n"
             "- 'Read', 'show', 'tell me about', 'what's in', 'summarise' = ONE agent. "
             "Only use multiple agents when the customer asks for analysis, implementation, "
-            "or cross-domain work.\n\n"
+            "or cross-domain work.\n"
+            "- NEVER return empty agents for implementation, coding, file-reading, or epic/story "
+            "work. These ALWAYS need at least developer or lead. Aria cannot read files or write "
+            "code — only specialists can.\n\n"
             "Return ONLY valid JSON. No explanation, no markdown."
         )
 
@@ -457,6 +460,9 @@ class Orchestrator:
             "Do NOT attempt to call any tools. "
             "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
             "none of that applies here.\n\n"
+            "NEVER output READ_FILE: markers. You cannot read files — only specialist agents "
+            "(Sam, Jordan, Morgan, etc.) can. If files need to be read, your job is to route "
+            "to the appropriate specialist, not to read files yourself.\n\n"
             "IMPORTANT: Never ask the customer to provide a file path, paste content, or share a "
             "link to information that is already in your Project Documents section above. "
             "If a document is in context, use it directly.\n\n"
