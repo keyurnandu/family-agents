@@ -2,6 +2,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+_SENTINEL = object()  # marks "not yet loaded from disk" for cached fields
+
 
 class MemoryManager:
     def __init__(self, base_dir: Path, project_name: str):
@@ -10,6 +12,8 @@ class MemoryManager:
         self.roles_dir = base_dir / "memory" / "roles"
         self.dynamic_dir = base_dir / "memory" / "dynamic" / project_name
         self.dynamic_dir.mkdir(parents=True, exist_ok=True)
+        self._entries_cache: list | None = None  # invalidated on every save
+        self._loaded_path_cache: str | None = _SENTINEL  # sentinel = not yet read
 
     def load_role_memory(self, role: str) -> str:
         role_file = self.roles_dir / f"{role}.md"
@@ -65,6 +69,7 @@ class MemoryManager:
 
         entry = f"\n### [{category.upper()}] — {timestamp} (via {source})\n{content.strip()}\n"
         memory_file.write_text(existing + entry, encoding="utf-8")
+        self._entries_cache = None  # invalidate cache
         return True
 
     def extract_and_save_memories(self, text: str, source_agent: str) -> int:
@@ -82,15 +87,20 @@ class MemoryManager:
         return saved
 
     def list_memory_entries(self) -> list[dict]:
-        """Return parsed memory entries as a list of dicts."""
+        """Return parsed memory entries as a list of dicts. Result is cached until next save."""
+        if self._entries_cache is not None:
+            return self._entries_cache
+
         # Read the raw file directly — do NOT call load_project_memory() here
         # as that method calls list_memory_entries() and would cause infinite recursion.
         memory_file = self.dynamic_dir / "memory.md"
         if not memory_file.exists():
-            return []
+            self._entries_cache = []
+            return self._entries_cache
         content = memory_file.read_text(encoding="utf-8")
         if not content:
-            return []
+            self._entries_cache = []
+            return self._entries_cache
 
         entries = []
         current = None
@@ -109,12 +119,14 @@ class MemoryManager:
                 current["content"] += line + "\n"
         if current:
             entries.append(current)
+        self._entries_cache = entries
         return entries
 
     def delete_project_memory(self):
         memory_file = self.dynamic_dir / "memory.md"
         if memory_file.exists():
             memory_file.unlink()
+        self._entries_cache = None
 
     def load_project_docs(self, max_docs: int = 3, max_chars_each: int = 3000) -> str:
         """
@@ -168,13 +180,18 @@ class MemoryManager:
         """Persist the currently loaded codebase path so it survives a restart."""
         path_file = self.dynamic_dir / "loaded_path.txt"
         path_file.write_text(path_str.strip(), encoding="utf-8")
+        self._loaded_path_cache = path_str.strip()
 
     def load_loaded_path(self) -> str | None:
         """Return the last loaded codebase path, or None if not set / missing."""
+        if self._loaded_path_cache is not _SENTINEL:
+            return self._loaded_path_cache if self._loaded_path_cache else None
         path_file = self.dynamic_dir / "loaded_path.txt"
         if path_file.exists():
             p = path_file.read_text(encoding="utf-8").strip()
+            self._loaded_path_cache = p
             return p if p else None
+        self._loaded_path_cache = ""
         return None
 
     def clear_loaded_path(self):
@@ -182,6 +199,7 @@ class MemoryManager:
         path_file = self.dynamic_dir / "loaded_path.txt"
         if path_file.exists():
             path_file.unlink()
+        self._loaded_path_cache = ""
 
     # ------------------------------------------------------------------
     # Skills

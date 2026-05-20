@@ -337,11 +337,11 @@ class Orchestrator:
         )
         return text.strip()
 
-    def _format_history(self) -> str:
+    def _format_history(self, limit: int = 6) -> str:
         if not self.messages:
             return ""
         lines = []
-        for m in self.messages[-6:]:
+        for m in self.messages[-limit:]:
             label = "Customer" if m["role"] == "user" else "Team"
             content = m["content"][:600] + "…" if len(m["content"]) > 600 else m["content"]
             lines.append(f"[{label}]: {content}")
@@ -710,7 +710,7 @@ class Orchestrator:
                 if saved:
                     self.display.show_memory_saved("requirement", m.group(1).strip())
 
-        # Detect natural-language teaching intent
+        # Detect natural-language teaching intent — handle and return (no routing needed)
         for pattern, role_group, skill_group in _TEACH_PATTERNS:
             m = re.search(pattern, user_input, re.IGNORECASE)
             if m:
@@ -721,7 +721,22 @@ class Orchestrator:
                     words = skill_desc.split()
                     skill_name = words[0].lower() if len(words) <= 2 else "-".join(w.lower() for w in words[:3])
                     self.add_skill(role, skill_name, skill_desc)
-                break  # only match first pattern
+                    self.db.save_message(self.project_name, "assistant", f"[Skill added: {skill_name} → {role}]")
+                    self.messages.append({"role": "assistant", "content": f"[Skill added: {skill_name} → {role}]"})
+                    return  # teaching handled — skip routing entirely
+                break
+
+        # Zero-LLM shortcuts: natural-language equivalents of CLI commands
+        _nl = user_input.strip().lower().rstrip("?.")
+        if re.match(r"^(?:show|what(?:'s| is)(?: the)?|list|display) (?:the )?(?:team|roster|agents?)$", _nl):
+            self.show_team()
+            return
+        if re.match(r"^(?:show|what(?:'s| is)(?: in| are)?|display|list|view) (?:the )?memory$", _nl):
+            self.show_memory()
+            return
+        if re.match(r"^(?:show|what(?:'s| is)(?: the)?|display|get) (?:the )?(?:project )?status$", _nl):
+            self.show_status()
+            return
 
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
@@ -777,7 +792,7 @@ class Orchestrator:
             return role, agent.respond(
                 task=task,
                 context=ctx,
-                history_text=self._format_history(),
+                history_text=self._format_history(limit=3),  # agents need less history
             )
 
         for phase_idx, phase in enumerate(phases):
@@ -975,7 +990,7 @@ class Orchestrator:
                 response = agent.respond(
                     task=message,
                     context=f"The customer is speaking directly to you.",
-                    history_text=self._format_history(),
+                    history_text=self._format_history(limit=3),
                 )
         except KeyboardInterrupt:
             console.print("\n[yellow]⚡ Interrupted.[/yellow]")
@@ -1054,7 +1069,7 @@ class Orchestrator:
             return call_claude(
                 prompt=prompt,
                 system_prompt="You write concise agent skill definitions. Be specific and actionable.",
-                model=self.model,
+                model="haiku",  # formatting task — haiku is sufficient and ~3× faster
             )
         except Exception:
             return f"## Skill: {skill_description}\n\n- You have expertise in {skill_description}.\n- Apply best practices for {skill_description} in all relevant work."

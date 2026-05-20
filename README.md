@@ -550,6 +550,8 @@ These bypass the LLM pipeline entirely:
 | `show config.py` / `read sprint.md` | 0 LLM calls — served direct from disk |
 | `show full requirements.txt` | 0 LLM calls — full file, no truncation |
 | `/memory`, `/history`, `/status`, `/team` | 0 LLM calls — local data only |
+| `show the team` / `show memory` / `project status` | 0 LLM calls — natural-language shortcuts |
+| `teach sam React Native` | 0 routing + synthesis — handled then exits |
 | `/export <type>` | 1 LLM call (the doc writer), no routing or synthesis |
 
 ### Routing speed
@@ -575,8 +577,10 @@ Routing also uses a stripped-down system prompt: no full document content (just 
 model: sonnet            # alias: haiku / sonnet / opus
 routing_model: haiku     # model used for Aria's routing decision — haiku is faster and sufficient
 max_history_messages: 10 # conversation turns loaded when resuming a project
-max_memory_entries: 40   # max memory entries injected into agent prompts (full history kept on disk)
+max_memory_entries: 15   # memory entries injected into agent prompts (full history kept on disk)
 max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)
+max_project_docs: 1      # docs injected into agent prompts (most recent only; full docs on disk)
+max_doc_chars: 1500      # chars per injected doc (say 'show full <doc>.md' to see complete file)
 
 team:
   default_roster: [pm, bsa, developer, lead]

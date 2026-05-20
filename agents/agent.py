@@ -35,11 +35,41 @@ class Agent:
         self.color = persona.get("color", "white")
         self.emoji = persona.get("emoji", "")
 
-    def _build_system_prompt(self) -> str:
+    # ------------------------------------------------------------------
+    # System prompt cache — rebuilt only when memory/skills change
+    # ------------------------------------------------------------------
+    _prompt_cache: dict = {}   # class-level; keyed by (role, project, cache_key)
+
+    def _prompt_cache_key(self) -> str:
+        """Lightweight cache key: memory entry count + skills mtime."""
+        import hashlib
+        mem_count = len(self.memory.list_memory_entries())
+        skills_dir = self.memory._skills_dir / self.role
+        skills_mtime = (
+            max((f.stat().st_mtime for f in skills_dir.glob("*.md")), default=0)
+            if skills_dir.exists() else 0
+        )
+        raw = f"{self.role}:{self.memory.project_name}:{mem_count}:{skills_mtime:.0f}"
+        return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+    def _build_system_prompt(self, task: str = "") -> str:
+        # ── Cache check ──────────────────────────────────────────────
+        cache_key = self._prompt_cache_key()
+        # Codebase context changes invalidate the cache — include loaded_path in key
+        loaded_path = getattr(self.orchestrator, "loaded_path", None) if self.orchestrator else None
+        full_key = (self.role, self.memory.project_name, cache_key, str(loaded_path))
+        if full_key in Agent._prompt_cache:
+            cached_base, cached_codebase_key = Agent._prompt_cache[full_key]
+            # Return cached prompt if codebase hasn't changed
+            if cached_codebase_key == str(loaded_path):
+                return cached_base
+
+        cfg = getattr(self.orchestrator, "config", {}) if self.orchestrator else {}
+        max_mem = cfg.get("max_memory_entries", 15)
+        max_docs = cfg.get("max_project_docs", 1)
+        max_doc_chars = cfg.get("max_doc_chars", 1500)
+
         role_memory = self.memory.load_role_memory(self.role)
-        max_mem = 40
-        if self.orchestrator:
-            max_mem = getattr(self.orchestrator, "config", {}).get("max_memory_entries", 40)
         project_memory = self.memory.load_project_memory(limit=max_mem)
 
         project_section = (
@@ -74,31 +104,45 @@ class Agent:
             sections.append(f"## Additional Skills & Expertise\n{skills_text}")
 
         # Inject previously exported project documents (requirements, sprint plans, etc.)
-        docs_text = self.memory.load_project_docs()
+        docs_text = self.memory.load_project_docs(max_docs=max_docs, max_chars_each=max_doc_chars)
         if docs_text:
-            sections.append(
-                "## Project Documents\n"
-                + docs_text
-            )
+            sections.append("## Project Documents\n" + docs_text)
 
-        # Inject loaded codebase context
+        # Inject loaded codebase context — LAZY: only when task is code/file related.
+        # Always inject the access instructions so the agent knows how to request files.
         if self.orchestrator:
-            loaded_path = getattr(self.orchestrator, "loaded_path", None)
             ctx = getattr(self.orchestrator, "codebase_context", {})
-            edit_mode = getattr(self.orchestrator, "edit_mode", False)
             if loaded_path and ctx:
-                codebase_lines = [
-                    f"## Loaded Codebase: {loaded_path}",
-                    f"Tech stack: {', '.join(ctx.get('tech_stack', [])) or 'unknown'}",
-                    f"Total files: {ctx.get('total_files', '?')}",
-                    "",
-                    "### Folder Structure",
-                    "```",
-                    ctx.get("structure_tree", ""),
-                    "```",
-                ]
-                for fname, content in ctx.get("key_files", {}).items():
-                    codebase_lines += [f"\n### {fname}", "```", content, "```"]
+                _CODE_TASK_RE = re.compile(
+                    r"\b(?:implement|code|refactor|debug|fix|read|file|class|function|method|"
+                    r"import|test|review|write|create|update|edit|change|add|remove|deploy|"
+                    r"build|run|epic|story|sprint|feature|bug|error|stack|module|api|endpoint)\b",
+                    re.IGNORECASE,
+                )
+                is_code_task = bool(_CODE_TASK_RE.search(task)) if task else True
+
+                if is_code_task:
+                    # Full context for code-related tasks
+                    codebase_lines = [
+                        f"## Loaded Codebase: {loaded_path}",
+                        f"Tech stack: {', '.join(ctx.get('tech_stack', [])) or 'unknown'}",
+                        f"Total files: {ctx.get('total_files', '?')}",
+                        "",
+                        "### Folder Structure",
+                        "```",
+                        ctx.get("structure_tree", ""),
+                        "```",
+                    ]
+                    for fname, content in ctx.get("key_files", {}).items():
+                        codebase_lines += [f"\n### {fname}", "```", content, "```"]
+                else:
+                    # Minimal context for non-code tasks — just the path and file list
+                    codebase_lines = [
+                        f"## Loaded Codebase: {loaded_path}",
+                        f"Tech stack: {', '.join(ctx.get('tech_stack', [])) or 'unknown'}",
+                        f"Total files: {ctx.get('total_files', '?')} — use READ_FILE:<path> to access any file.",
+                    ]
+
                 codebase_lines += [
                     "",
                     "### Accessing and editing files",
@@ -149,7 +193,10 @@ class Agent:
             "- Use relative paths from the project root\n"
             "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions"
         )
-        return "\n\n".join(sections)
+        result = "\n\n".join(sections)
+        # Write to cache (keyed without task so it's reusable across calls)
+        Agent._prompt_cache[full_key] = (result, str(loaded_path))
+        return result
 
     def _get_peer_input(self, colleague_role: str, question: str) -> str:
         """Ask a peer agent a single question (no further nesting)."""
@@ -177,7 +224,7 @@ class Agent:
 
     def respond(self, task: str, context: str, history_text: str) -> str:
         """Generate a response, handling one round of peer consultation if needed."""
-        system_prompt = self._build_system_prompt()
+        system_prompt = self._build_system_prompt(task=task)
 
         prompt_parts = []
         if history_text:
@@ -198,6 +245,7 @@ class Agent:
             read_requests = re.findall(r"READ_FILE:([^\n]+)", response)
             if read_requests:
                 file_contents: dict[str, str] = {}
+                _disk_cache: dict[str, str] = {}  # dedup: avoid re-reading same file twice
 
                 # Raise the limit when the task explicitly asks for the full/entire file
                 _FULL_RE = re.compile(
@@ -211,6 +259,9 @@ class Agent:
 
                 for req in read_requests[:5]:  # cap at 5 files per response
                     req_clean = req.strip()
+                    if req_clean in _disk_cache:
+                        file_contents[req_clean] = _disk_cache[req_clean]
+                        continue
                     raw = None
 
                     # 1. Check project docs/files first (requirements, sprint plans, etc.)
@@ -241,6 +292,8 @@ class Agent:
                             )
                         else:
                             file_contents[req_clean] = raw
+                        if raw is not None:
+                            _disk_cache[req_clean] = file_contents.get(req_clean, raw)
                 if file_contents:
                     file_ctx = "\n\n".join(
                         f"### {fname}\n```\n{content}\n```"
