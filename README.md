@@ -139,6 +139,7 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
+| `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` |
 | `/load <path>` | Load an existing codebase for review or editing |
 | `/unload` | Unload the current codebase |
 | `/edit-mode on\|off` | Enable or disable writes to the loaded codebase |

@@ -265,6 +265,7 @@ class Display:
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
             "  [cyan]/edit-mode on|off[/cyan]  Enable/disable writes to the loaded codebase\n"
+            "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"
             "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
             "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"

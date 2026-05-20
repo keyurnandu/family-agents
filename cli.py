@@ -216,6 +216,26 @@ def _handle_pre_project_command(raw: str, saved: list, config: dict, display) ->
         sys.exit(0)
     elif cmd == "/status":
         console.print("[dim]Open a project first to see its status.[/dim]")
+    elif raw.lower().startswith("/model"):
+        parts = raw.split(None, 1)
+        arg = parts[1].strip().lower() if len(parts) > 1 else ""
+        current = config.get("model", "sonnet")
+        if not arg:
+            console.print(
+                f"[dim]Default model: [bold]{current}[/bold]  "
+                "· Change with [cyan]/model haiku|sonnet|opus[/cyan][/dim]"
+            )
+        elif arg in ("haiku", "sonnet", "opus"):
+            config["model"] = arg
+            console.print(
+                f"[green]✓ Default model set to:[/green] [bold]{arg}[/bold]  "
+                "[dim](applies to the next project you open)[/dim]\n"
+            )
+        else:
+            console.print(
+                f"[yellow]Unknown model:[/yellow] {arg}  "
+                "[dim]Available: haiku · sonnet · opus[/dim]"
+            )
     else:
         console.print(
             f"[yellow]{raw}[/yellow] is only available inside a project.  "
@@ -403,6 +423,30 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     status = "[yellow]ON[/yellow]" if orchestrator.edit_mode else "[dim]OFF[/dim]"
                     path = orchestrator.loaded_path or "none"
                     console.print(f"[dim]Edit mode: {status}  ·  Loaded path: {path}[/dim]")
+
+            elif parts[0] == "/model":
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                MODEL_ALIASES = {"haiku": "haiku", "sonnet": "sonnet", "opus": "opus"}
+                if not arg:
+                    console.print(
+                        f"[dim]Current model: [bold]{orchestrator.model}[/bold]  "
+                        "· Change with [cyan]/model haiku|sonnet|opus[/cyan][/dim]"
+                    )
+                elif arg in MODEL_ALIASES:
+                    old = orchestrator.model
+                    orchestrator.model = MODEL_ALIASES[arg]
+                    # Propagate to all agents
+                    for agent in orchestrator.agents.values():
+                        agent.model = MODEL_ALIASES[arg]
+                    console.print(
+                        f"[green]✓ Model switched:[/green] {old} → [bold]{orchestrator.model}[/bold]  "
+                        "[dim](takes effect on the next message)[/dim]\n"
+                    )
+                else:
+                    console.print(
+                        f"[yellow]Unknown model:[/yellow] {arg}  "
+                        "[dim]Available: haiku · sonnet · opus[/dim]"
+                    )
 
             elif cmd == "/status":
                 orchestrator.show_status()
