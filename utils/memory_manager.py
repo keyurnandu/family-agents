@@ -17,12 +17,37 @@ class MemoryManager:
             return role_file.read_text(encoding="utf-8")
         return f"# {role.upper()}\nNo predefined role memory found."
 
-    def load_project_memory(self) -> str:
+    def load_project_memory(self, limit: int = 40) -> str:
+        """
+        Return project memory for injection into agent prompts.
+        Only the most recent `limit` entries are returned to control token usage.
+        The full history is always preserved on disk.
+        """
         memory_file = self.dynamic_dir / "memory.md"
-        if memory_file.exists():
-            content = memory_file.read_text(encoding="utf-8")
-            return content if content.strip() else ""
-        return ""
+        if not memory_file.exists():
+            return ""
+        content = memory_file.read_text(encoding="utf-8")
+        if not content.strip():
+            return ""
+
+        entries = self.list_memory_entries()
+        if not entries or len(entries) <= limit:
+            return content
+
+        # Rebuild from the most recent `limit` entries only
+        omitted = len(entries) - limit
+        recent = entries[-limit:]
+        header = (
+            f"# Project Memory: {self.project_name}\n"
+            f"[{omitted} older entries omitted to save tokens — full history in memory.md]\n"
+        )
+        body = ""
+        for e in recent:
+            body += (
+                f"\n### [{e['category'].upper()}] — {e['timestamp']} (via {e['source']})\n"
+                f"{e['content'].strip()}\n"
+            )
+        return header + body
 
     def save_project_memory(self, content: str, category: str, source: str = "system"):
         memory_file = self.dynamic_dir / "memory.md"

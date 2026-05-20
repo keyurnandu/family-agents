@@ -38,6 +38,19 @@ class Display:
             )
             console.print(response)
 
+    def show_token_usage(self, exchange_tokens: int, session_tokens: int, calls: int):
+        """Show a compact per-message token summary after each exchange."""
+        pct = min(session_tokens / 80_000, 1.0)
+        bar_color = "green" if pct < 0.5 else "yellow" if pct < 0.8 else "red"
+        pct_str = f"{int(pct * 100)}%"
+        warn = "  [yellow]⚠ context large — consider /clear[/yellow]" if pct > 0.75 else ""
+        console.print(
+            f"[dim]~{exchange_tokens:,} tokens this message  ·  "
+            f"session ~{session_tokens:,}  ·  "
+            f"[{bar_color}]{pct_str} of safe context[/{bar_color}]"
+            f"{warn}[/dim]"
+        )
+
     def show_memory_saved(self, category: str, snippet: str):
         short = snippet[:70] + "..." if len(snippet) > 70 else snippet
         console.print(

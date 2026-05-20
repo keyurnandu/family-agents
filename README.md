@@ -467,6 +467,44 @@ To add a brand new role:
 
 ---
 
+## Token Usage & Optimization
+
+### Live feedback
+
+Every message now shows a compact token summary after the team responds:
+
+```
+~1,400 tokens this message  ·  session ~9,800  ·  12% of safe context
+```
+
+Turns yellow at 50% and shows a warning at 75%:
+
+```
+~3,200 tokens this message  ·  session ~65,000  ·  81% of safe context  ⚠ context large — consider /clear
+```
+
+Use `/status` for a full breakdown with a visual bar.
+
+### Optimization tips
+
+| Action | Impact |
+|---|---|
+| `/model haiku` for simple questions | ~10× cheaper than Sonnet, plenty fast for Q&A |
+| `/model opus` only for deep analysis | Save it for architecture decisions or complex reviews |
+| `/clear` when context bar goes yellow | Resets the context window — memory and history stay |
+| Keep `max_history_messages` low | Each resumed message costs tokens on every call |
+| `/unload` codebase when not needed | Codebase tree + key files go into every agent prompt |
+| Lower `max_memory_entries` | Controls how many memory entries agents see per call |
+
+### What consumes the most tokens
+
+1. **Codebase loaded** — the folder tree and key files are injected into every agent's system prompt on every message. Unload when you're done reviewing.
+2. **Multi-agent phases** — a 4-agent response = 4 full system prompts + 1 routing call + 1 synthesis call. Single-agent @mentions are far cheaper.
+3. **Project memory growth** — by default agents only see the last 40 memory entries (full history stays on disk). Tune with `max_memory_entries` in `config/settings.yaml`.
+4. **Long conversation history** — tune `max_history_messages` in `config/settings.yaml` (default: 10).
+
+---
+
 ## Configuration
 
 **`config/settings.yaml`**

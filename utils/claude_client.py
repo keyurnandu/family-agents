@@ -18,6 +18,10 @@ def get_session_stats() -> dict:
         "estimated_tokens": total_chars // 4,
     }
 
+def snapshot_stats() -> dict:
+    """Return a point-in-time copy of session stats for diffing before/after an exchange."""
+    return dict(_session_stats)
+
 def reset_session_stats() -> None:
     _session_stats.update(calls=0, input_chars=0, output_chars=0)
 

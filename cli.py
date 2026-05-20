@@ -570,11 +570,21 @@ def main(project: str | None, list_projects: bool, model: str | None):
         # ── @mention: talk directly to one agent ─────────────────────
         mention = re.match(r"^@(\w+)\s+(.*)", user_input, re.DOTALL)
         if mention:
+            from utils.claude_client import snapshot_stats, get_session_stats
+            pre = snapshot_stats()
             orchestrator.direct_message(mention.group(1).lower(), mention.group(2).strip())
+            post = get_session_stats()
+            exchange_tokens = post["estimated_tokens"] - (pre["input_chars"] + pre["output_chars"]) // 4
+            display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"])
             continue
 
         # ── Regular message → route through Aria ─────────────────────
+        from utils.claude_client import snapshot_stats, get_session_stats
+        pre = snapshot_stats()
         orchestrator.process(user_input)
+        post = get_session_stats()
+        exchange_tokens = post["estimated_tokens"] - (pre["input_chars"] + pre["output_chars"]) // 4
+        display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"])
 
 
 if __name__ == "__main__":

@@ -37,7 +37,10 @@ class Agent:
 
     def _build_system_prompt(self) -> str:
         role_memory = self.memory.load_role_memory(self.role)
-        project_memory = self.memory.load_project_memory()
+        max_mem = 40
+        if self.orchestrator:
+            max_mem = getattr(self.orchestrator, "config", {}).get("max_memory_entries", 40)
+        project_memory = self.memory.load_project_memory(limit=max_mem)
 
         project_section = (
             f"## Project Memory\n{project_memory}"

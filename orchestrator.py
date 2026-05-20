@@ -313,7 +313,9 @@ class Orchestrator:
 
     def _routing_system_prompt(self) -> str:
         role_memory = self.memory.load_role_memory("orchestrator")
-        project_memory = self.memory.load_project_memory()
+        project_memory = self.memory.load_project_memory(
+            limit=self.config.get("max_memory_entries", 40)
+        )
 
         team_lines = [
             f"- {role} ({self.config['agent_personas'].get(role, {}).get('name', role)}): "

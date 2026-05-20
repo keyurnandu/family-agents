@@ -1,5 +1,6 @@
 model: sonnet            # alias: haiku / sonnet / opus
 max_history_messages: 10 # conversation turns loaded when resuming a project
+max_memory_entries: 40   # max memory entries injected into agent prompts (full history kept on disk)
 
 team:
   default_roster:
