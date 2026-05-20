@@ -861,8 +861,8 @@ class Orchestrator:
             return
 
         # Pre-routing guard: if the task needs codebase access and nothing is loaded,
-        # tell the user immediately — don't route to agents who will all fail and
-        # produce a confusing synthesized error.
+        # try to auto-reload the last used path silently — no prompt, no friction.
+        # Only stop and ask the user if there is genuinely no saved path to reload.
         _CODEBASE_INTENT_RE = re.compile(
             r"\b(?:review|read|show|open|check|audit|inspect|analyse|analyze|"
             r"implement|write|fix|refactor|update|modify|change|edit|"
@@ -874,18 +874,25 @@ class Orchestrator:
         if not self.loaded_path and _CODEBASE_INTENT_RE.search(user_input):
             saved_cb = self.memory.load_loaded_path()
             if saved_cb:
-                console.print(
-                    f"\n[yellow]No codebase loaded this session.[/yellow] "
-                    f"Last session used [cyan]{saved_cb}[/cyan].\n"
-                    f"Run [bold cyan]/load {saved_cb}[/bold cyan] to reload it, then try again.\n"
-                )
+                cb_path = Path(saved_cb)
+                if cb_path.exists() and cb_path.is_dir():
+                    # Auto-reload silently — just pick up where we left off
+                    console.print(f"[dim]↺  Auto-reloading [cyan]{saved_cb}[/cyan]…[/dim]")
+                    self.load_codebase(saved_cb)
+                    # Fall through — codebase is now loaded, continue with the request
+                else:
+                    console.print(
+                        f"\n[yellow]Saved codebase path no longer exists:[/yellow] [cyan]{saved_cb}[/cyan]\n"
+                        "Run [bold cyan]/load <new-path>[/bold cyan] to point the team at your code.\n"
+                    )
+                    return
             else:
                 console.print(
                     "\n[yellow]No codebase loaded.[/yellow] "
                     "Run [bold cyan]/load <path-to-your-project>[/bold cyan] "
                     "to point the team at your code.\n"
                 )
-            return
+                return
 
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
