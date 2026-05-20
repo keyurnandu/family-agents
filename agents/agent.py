@@ -302,7 +302,7 @@ class Agent:
                     except Exception:
                         pass
 
-                    # 4. Fall back to loaded codebase
+                    # 4. Fall back to loaded codebase — exact path first
                     if raw is None and loaded_path:
                         try:
                             fpath = (loaded_path / req_clean).resolve()
@@ -310,6 +310,32 @@ class Agent:
                             if str(fpath).lower().startswith(cb_root):
                                 if fpath.exists() and fpath.is_file():
                                     raw = fpath.read_text(encoding="utf-8", errors="replace")
+                        except Exception:
+                            pass
+
+                    # 5. Fuzzy filename fallback — agents sometimes guess paths that are
+                    #    one level off (tree only showed depth N, file is at depth N+1).
+                    #    Search the whole codebase by filename and use the unique match.
+                    if raw is None and loaded_path:
+                        try:
+                            filename = Path(req_clean).name
+                            _IGNORE = {
+                                ".git", "node_modules", "__pycache__",
+                                ".venv", "venv", "dist", "build", ".next",
+                            }
+                            matches = [
+                                f for f in loaded_path.rglob(filename)
+                                if f.is_file()
+                                and not any(ig in f.parts for ig in _IGNORE)
+                            ]
+                            if matches:
+                                # Pick the match whose path best overlaps the requested path
+                                req_parts = set(Path(req_clean).parts)
+                                best = max(
+                                    matches,
+                                    key=lambda f: len(set(f.parts) & req_parts),
+                                )
+                                raw = best.read_text(encoding="utf-8", errors="replace")
                         except Exception:
                             pass
 

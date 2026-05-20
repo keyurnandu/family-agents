@@ -243,7 +243,7 @@ class Orchestrator:
         }
 
         def build_tree(p: Path, prefix: str = "", depth: int = 0) -> list[str]:
-            if depth > 2:
+            if depth > 3:
                 return []
             lines: list[str] = []
             try:
@@ -254,13 +254,13 @@ class Orchestrator:
             for idx, item in enumerate(visible):
                 connector = "└── " if idx == len(visible) - 1 else "├── "
                 lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
-                if item.is_dir() and depth < 2:
+                if item.is_dir() and depth < 3:
                     ext = "    " if idx == len(visible) - 1 else "│   "
                     lines.extend(build_tree(item, prefix + ext, depth + 1))
             return lines
 
         tree_lines = [f"{path.name}/"] + build_tree(path)
-        structure_tree = "\n".join(tree_lines[:100])
+        structure_tree = "\n".join(tree_lines[:200])
 
         KEY_FILE_LIMIT = 4000   # chars — enough for most config/manifest files
         ENTRY_POINT_LIMIT = 3000  # chars — enough for a typical entry point
