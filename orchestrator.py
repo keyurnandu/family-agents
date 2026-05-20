@@ -847,6 +847,9 @@ class Orchestrator:
         self.codebase_context = ctx
         self.edit_mode = False
 
+        # Persist the path so the next session can offer to reload it
+        self.memory.save_loaded_path(str(path))
+
         self.memory.save_project_memory(
             content=(
                 f"Codebase loaded: {path}\n"
@@ -866,6 +869,7 @@ class Orchestrator:
         self.loaded_path = None
         self.codebase_context = {}
         self.edit_mode = False
+        self.memory.clear_loaded_path()
         console.print(f"[dim]Unloaded: {path}[/dim]\n")
 
     def _generate_skill_content(self, role: str, agent_name: str, skill_description: str) -> str:

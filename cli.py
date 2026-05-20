@@ -115,7 +115,9 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
     """
     Initialise a project by name and return a ready Orchestrator.
     The _general workspace opens silently with no project-folder noise.
+    If the project had a codebase loaded last session, prompts to reload it.
     """
+    from pathlib import Path
     from orchestrator import Orchestrator
 
     project_dir = BASE_DIR / "projects" / name
@@ -142,13 +144,35 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
         db.ensure_project(name)
         console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
 
-    return Orchestrator(
+    orch = Orchestrator(
         project_name=name,
         base_dir=BASE_DIR,
         db=db,
         display=display,
         model_override=model,
     )
+
+    # ── Offer to reload a codebase from the previous session ──────────
+    saved_cb = orch.memory.load_loaded_path()
+    if saved_cb:
+        cb_path = Path(saved_cb)
+        if cb_path.exists() and cb_path.is_dir():
+            try:
+                answer = Prompt.ask(
+                    f"[dim]Last session had [cyan]{saved_cb}[/cyan] loaded — reload it?[/dim] [y/N]",
+                    default="n",
+                ).strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                answer = "n"
+            if answer == "y":
+                orch.load_codebase(saved_cb)
+            else:
+                console.print("[dim]Skipped — use /load to reload anytime.[/dim]\n")
+        else:
+            # Path no longer exists — silently drop the saved reference
+            orch.memory.clear_loaded_path()
+
+    return orch
 
 
 def _pick_from_list(raw: str, saved: list) -> str | None:

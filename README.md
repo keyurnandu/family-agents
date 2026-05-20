@@ -299,10 +299,24 @@ By default the codebase is **read-only** — agents can analyse and suggest, but
 
 With edit mode on, agents write files using the same permission-prompted flow as normal project files — you approve each write before it happens.
 
+### Memory across sessions
+
+When you load a codebase, the path is saved to project memory. Next time you open the same project you get a prompt:
+
+```
+Last session had /path/to/my-app loaded — reload it? [y/N]
+```
+
+- **y** — the team rescans the codebase and picks up exactly where you left off
+- **n** — skipped; use `/load` again anytime
+- If the path no longer exists (moved or deleted), the reference is silently cleared
+
+Any decisions, notes, or architectural discussions from previous sessions are already in project memory — even after a reload, the team has full context.
+
 ### Unload
 
 ```bash
-/unload    # removes the codebase from the team's context
+/unload    # removes the codebase from the team's context and clears the saved path
 ```
 
 ---

@@ -87,6 +87,29 @@ class MemoryManager:
             memory_file.unlink()
 
     # ------------------------------------------------------------------
+    # Loaded codebase path — persists across sessions
+    # ------------------------------------------------------------------
+
+    def save_loaded_path(self, path_str: str):
+        """Persist the currently loaded codebase path so it survives a restart."""
+        path_file = self.dynamic_dir / "loaded_path.txt"
+        path_file.write_text(path_str.strip(), encoding="utf-8")
+
+    def load_loaded_path(self) -> str | None:
+        """Return the last loaded codebase path, or None if not set / missing."""
+        path_file = self.dynamic_dir / "loaded_path.txt"
+        if path_file.exists():
+            p = path_file.read_text(encoding="utf-8").strip()
+            return p if p else None
+        return None
+
+    def clear_loaded_path(self):
+        """Remove the saved loaded path (called on /unload)."""
+        path_file = self.dynamic_dir / "loaded_path.txt"
+        if path_file.exists():
+            path_file.unlink()
+
+    # ------------------------------------------------------------------
     # Skills
     # ------------------------------------------------------------------
 
