@@ -258,7 +258,7 @@ Point the team at any existing project on your machine — they'll scan it, unde
 
 ### Load a codebase
 
-`/load` works anywhere — before or after opening a project. If no project is open it silently starts a general chat session.
+`/load` works anywhere — before or after opening a project. If no project is open, the folder name is automatically used as the project name so each codebase gets its own isolated memory, history, and docs.
 
 ```bash
 /load C:\projects\my-app
@@ -288,7 +288,7 @@ A panel confirms what was found:
 │    │   └── api/                                          │
 │    └── package.json                                      │
 │                                                          │
-│  Mode: READ-ONLY — use /edit-mode on to enable writes    │
+│  Agents can read any file. Suggest changes? One prompt.  │
 ╰─────────────────────────────────────────────────────────╯
 ```
 
@@ -402,7 +402,7 @@ When you describe a new project for the first time, Developer and Lead automatic
 | Entry point | `src/index.js`, `src/main.py`, `src/App.tsx`, etc. with starter boilerplate |
 | Config files | `tsconfig.json`, `.eslintrc`, `pytest.ini`, `Makefile`, etc. as appropriate |
 
-Tech stack is inferred from your description. Scaffolding runs exactly once — on the first message of a new project. Skipped for general chat.
+Tech stack is inferred from your description. Scaffolding runs exactly once — on the first message of a new project. Skipped for general chat and for any project opened via `/load` (the codebase already exists).
 
 ### Memory
 
