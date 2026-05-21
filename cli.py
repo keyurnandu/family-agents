@@ -369,6 +369,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
         if user_input.startswith("/"):
             cmd = user_input.lower()
             parts = cmd.split(None, 1)
+            # Preserve original casing for arguments (project names are case-sensitive)
+            raw_parts = user_input.split(None, 1)
 
             if cmd in ("/quit", "/exit", "/q"):
                 console.print("[dim]Session saved. Goodbye![/dim]")
@@ -493,6 +495,15 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 saved = db.list_projects()
                 existing_names = {p["name"] for p in saved}
 
+                def _resolve_project_name(name: str) -> str:
+                    """Return the canonical project name (preserving DB casing), case-insensitive."""
+                    if name in existing_names:
+                        return name
+                    for existing in existing_names:
+                        if existing.lower() == name.lower():
+                            return existing
+                    return name  # not found — return as-is so _validate_switch can error
+
                 def _validate_switch(name: str) -> bool:
                     """Return True if name is a valid switch target, print error if not."""
                     if name == GENERAL:
@@ -501,7 +512,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                         return True
                     # Not found — suggest close matches
                     close = [n for n in existing_names if n != GENERAL and
-                             (n.startswith(name[:3]) or name[:3] in n or
+                             (n.lower().startswith(name[:3].lower()) or name[:3].lower() in n.lower() or
                               abs(len(n) - len(name)) <= 3)]
                     msg = f"[yellow]No project named '[bold]{name}[/bold]'.[/yellow]"
                     if close:
@@ -513,13 +524,15 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     return False
 
                 if len(parts) > 1:
-                    arg = parts[1].strip()
-                    if arg == GENERAL:
+                    # Use raw_parts to preserve original casing; strip surrounding quotes
+                    arg = raw_parts[1].strip().strip('"\'') if len(raw_parts) > 1 else parts[1].strip()
+                    if arg.lower() == GENERAL:
                         name = GENERAL
                     else:
                         name = _pick_from_list(arg, saved)
                         if name is None:
                             continue
+                        name = _resolve_project_name(name)  # fix casing
                         if not _validate_switch(name):
                             continue
                 else:
@@ -555,13 +568,13 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
             # ── /new <name> ───────────────────────────────────────────
             elif parts[0] == "/new":
-                if len(parts) < 2 or not parts[1].strip():
+                if len(raw_parts) < 2 or not raw_parts[1].strip():
                     console.print(
                         "[yellow]Usage:[/yellow] /new <project-name>  "
                         "[dim]e.g. /new restaurant-saas[/dim]"
                     )
                     continue
-                name = parts[1].strip()
+                name = raw_parts[1].strip().strip("\"'")
                 if "/" in name or "\\" in name:
                     console.print("[yellow]Project name can't contain slashes.[/yellow]")
                     continue
