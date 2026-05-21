@@ -310,6 +310,86 @@ The `/status` command also shows TDD mode in the project snapshot.
 
 ---
 
+## Agent Self-Learning — The Feedback Loop
+
+Every agent improves automatically over time. Lessons from failures, corrections, and reflections are saved to their skill files and loaded in every future session.
+
+### Three ways agents learn
+
+**1. Automatically from failures**
+
+Every time a bash command fails or a TDD health check fails after a file write, the responsible agent immediately extracts a lesson and saves it:
+
+```
+✗ Exited 1  ('uv' is not recognized…)
+  📚 💻 Sam learned: Never use uv on this machine — use venv\Scripts\python.exe instead.
+```
+
+No user action needed. The lesson is live from the next message.
+
+**2. From your corrections**
+
+When you correct an agent's approach, the lesson is automatically detected and saved:
+
+```
+You: stop using uv — it's not installed, use venv\Scripts\python.exe
+
+  📚 💻 Sam learned: Never use uv on this machine — always use venv\Scripts\python.exe directly.
+```
+
+Correction patterns detected: "stop doing", "never use", "don't", "wrong because", "you should have", "next time", "always use instead".
+
+**3. `/retrospective` — deliberate reflection**
+
+At the end of a session, ask every agent to reflect on their own performance and save a lesson:
+
+```
+/retrospective
+
+💻 Sam reflecting…
+  → Never attempt to run pytest without first verifying the import chain is clean
+  ✓ Saved to Sam's skills
+
+⚡ Jordan reflecting…
+  → Always check all callers of a module before renaming or removing a symbol
+  ✓ Saved to Jordan's skills
+
+✅ Casey reflecting…
+  → Before writing tests, confirm the test runner can collect them with --collect-only
+  ✓ Saved to Casey's skills
+```
+
+**`/feedback <agent> <lesson>`** — inject a lesson directly:
+
+```
+/feedback @sam never use uv on Windows — it's not installed
+/feedback jordan always audit all imports from a file before modifying it
+/feedback casey check venv exists before writing pytest commands
+```
+
+### Where lessons are stored
+
+All auto-learned lessons accumulate in `memory/skills/<role>/auto-learned.md` — one file per agent, timestamped entries. Loaded automatically into every agent's system prompt alongside manually-added skills.
+
+```
+# Auto-Learned Lessons — developer
+
+### [2026-05-21 14:32] via bash-failure
+Never use uv on this machine — 'uv' is not recognized. Use venv\Scripts\python.exe.
+
+### [2026-05-21 15:01] via health-check-failure
+Before writing files that import from a model, verify all referenced symbols exist in that model.
+
+### [2026-05-21 15:45] via retrospective
+Always scan all files importing from a module before modifying it — fix all callers in one pass.
+```
+
+### The compound effect
+
+Each session the team is a little better than the last. Over weeks of use, agents accumulate a detailed, project-specific knowledge base of what works and what doesn't on your machine, in your codebase, with your workflow.
+
+---
+
 ## Teaching the Team New Skills
 
 Any agent can be taught new skills that persist across all projects and sessions. Skills are stored as markdown files in `memory/skills/<role>/` and are automatically included in the agent's system prompt.

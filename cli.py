@@ -450,6 +450,30 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 else:
                     orchestrator.export_doc(doc_type)
 
+            elif parts[0] == "/retrospective" or cmd == "/retro":
+                orchestrator.run_retrospective()
+
+            elif parts[0] == "/feedback":
+                # /feedback @sam never use uv
+                # /feedback sam always check imports first
+                rest = raw_parts[1].strip() if len(raw_parts) > 1 else ""
+                if not rest:
+                    console.print(
+                        "[dim]Usage: /feedback <agent> <lesson>\n"
+                        "  e.g. /feedback @sam never use uv on Windows\n"
+                        "  e.g. /feedback jordan always audit imports before running tests[/dim]"
+                    )
+                else:
+                    # Split agent identifier from lesson
+                    tokens = rest.lstrip("@").split(None, 1)
+                    if len(tokens) < 2:
+                        console.print(
+                            "[dim]Usage: /feedback <agent> <lesson>  "
+                            "e.g. /feedback sam never use uv[/dim]"
+                        )
+                    else:
+                        orchestrator.add_feedback(tokens[0], tokens[1])
+
             elif parts[0] == "/tdd":
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
                 tdd_enabled, tdd_health_cmd = orchestrator.memory.load_tdd_mode()

@@ -526,6 +526,184 @@ class Orchestrator:
         )
         return "\n".join(parts)
 
+    # ------------------------------------------------------------------
+    # Feedback loop — auto-learning from failures, corrections, retrospectives
+    # ------------------------------------------------------------------
+
+    def _extract_lesson(self, role: str, failure_context: str, trigger: str) -> None:
+        """
+        Call haiku to distill a concise, actionable lesson from a failure
+        and save it to the role's auto-learned skill file. Silent — never
+        blocks the main flow.
+        """
+        persona = self.config["agent_personas"].get(role, {})
+        name = persona.get("name", role.upper())
+        prompt = (
+            f"You are {name}, a {role} on a software development team.\n\n"
+            f"Something just went wrong:\n{failure_context}\n\n"
+            "Write ONE concise, actionable lesson you will apply next time. "
+            "Start with 'Always', 'Never', or 'Before'. "
+            "Be specific — reference the exact command, tool, or pattern involved. "
+            "Maximum 2 sentences. No preamble, no explanation."
+        )
+        try:
+            lesson = call_claude(
+                prompt=prompt,
+                system_prompt="You extract precise, actionable lessons from failures. Be specific, not generic.",
+                model="haiku",
+            )
+            if lesson.strip():
+                path = self.memory.save_auto_skill(role, lesson.strip(), trigger)
+                p = self.config["agent_personas"].get(role, {})
+                console.print(
+                    f"[dim green]  📚 {p.get('emoji','')} {name} learned: "
+                    f"{lesson.strip()[:80]}{'…' if len(lesson) > 80 else ''}[/dim green]"
+                )
+        except Exception:
+            pass  # non-critical — never block
+
+    def _check_outcomes_for_lessons(self, role: str, outcomes: list[str]) -> None:
+        """After an agent's actions, check outcomes for failures and extract lessons."""
+        for outcome in outcomes:
+            if outcome.startswith("BASH FAILED"):
+                self._extract_lesson(
+                    role,
+                    f"Bash command failed:\n{outcome}",
+                    trigger="bash-failure",
+                )
+            elif outcome.startswith("HEALTH_CHECK: FAILED"):
+                snippet = outcome.replace("HEALTH_CHECK: FAILED", "").strip()
+                self._extract_lesson(
+                    role,
+                    f"Health check failed after writing files:\n{snippet}",
+                    trigger="health-check-failure",
+                )
+
+    def _detect_and_save_correction(self, user_input: str) -> bool:
+        """
+        Detect when the user is correcting an agent and save the lesson
+        as a skill for the relevant agent. Returns True if a correction was saved.
+        """
+        _CORRECTION_RE = re.compile(
+            r"\b(?:stop|never|don'?t|do not|avoid|wrong|incorrect|"
+            r"you should(?:'ve| have)?|next time|always|instead of|"
+            r"that'?s (?:wrong|incorrect|not right)|"
+            r"should(?:'ve| have) (?:used?|done?|run|written?))\b",
+            re.IGNORECASE,
+        )
+        if not _CORRECTION_RE.search(user_input):
+            return False
+
+        # Find which agent the correction is about
+        target_role = None
+        for role, persona in self.config["agent_personas"].items():
+            name = persona.get("name", "").lower()
+            if name and name in user_input.lower():
+                target_role = role
+                break
+            if role != "orchestrator" and role in user_input.lower():
+                target_role = role
+                break
+
+        # If no explicit mention, apply to the last agent who acted
+        if not target_role and self.messages:
+            # Look at recent assistant messages to infer who was last active
+            for msg in reversed(self.messages[-6:]):
+                if msg["role"] == "assistant":
+                    for role in self.active_roster:
+                        name = self.config["agent_personas"].get(role, {}).get("name", "").lower()
+                        if name and f"[{name}" in msg["content"].lower():
+                            target_role = role
+                            break
+                    if target_role:
+                        break
+
+        if not target_role:
+            return False
+
+        self._extract_lesson(
+            target_role,
+            f"User correction: {user_input.strip()}",
+            trigger="user-correction",
+        )
+        return True
+
+    def run_retrospective(self) -> None:
+        """
+        Ask each active agent to reflect on the session and extract one
+        actionable lesson. Lessons are saved to their auto-learned skill file.
+        """
+        console.print(
+            "\n[bold bright_cyan]🔄 Session Retrospective[/bold bright_cyan]  "
+            "[dim]Each agent reflects on what they'd do differently…[/dim]\n"
+        )
+
+        history_text = self._format_history(limit=10)
+        if not history_text:
+            console.print("[dim]No session history to reflect on yet.[/dim]\n")
+            return
+
+        roles_to_reflect = [r for r in self.active_roster if r != "orchestrator"]
+
+        for role in roles_to_reflect:
+            persona = self.config["agent_personas"].get(role, {})
+            name = persona.get("name", role.upper())
+            color = persona.get("color", "white")
+            emoji = persona.get("emoji", "")
+
+            prompt = (
+                f"You are {name}, a {role} on a software development team.\n\n"
+                f"Here is what happened in this session:\n{history_text}\n\n"
+                "Based on this session, identify ONE specific, actionable lesson "
+                "you would apply differently next time. Focus on any mistakes, "
+                "inefficiencies, or better approaches you notice in your own work. "
+                "If you performed well this session, identify a habit worth reinforcing.\n\n"
+                "Format: a single bullet point starting with 'Always', 'Never', or 'Before'. "
+                "Be concrete and specific — reference actual tools, commands, or patterns "
+                "from this session. Maximum 2 sentences."
+            )
+
+            try:
+                with console.status(
+                    f"[{color}]{emoji} {name} reflecting…[/{color}]", spinner="dots"
+                ):
+                    lesson = call_claude(
+                        prompt=prompt,
+                        system_prompt=(
+                            f"You are {name} ({role}). Extract a precise, actionable lesson "
+                            "from your own performance this session. Be self-critical and specific."
+                        ),
+                        model="haiku",
+                    )
+
+                if lesson.strip():
+                    self.memory.save_auto_skill(role, lesson.strip(), trigger="retrospective")
+                    console.print(
+                        f"[{color}]{emoji} {name}[/{color}]  "
+                        f"[dim]{lesson.strip()}[/dim]"
+                    )
+                    console.print(f"  [dim green]✓ Saved to {name}'s skills[/dim green]\n")
+            except Exception as e:
+                console.print(f"[dim yellow]  {name} reflection failed: {e}[/dim yellow]\n")
+
+        console.print("[dim]Retrospective complete. Lessons saved and active from the next session.[/dim]\n")
+
+    def add_feedback(self, role_identifier: str, lesson: str) -> None:
+        """Save a direct user-provided lesson as a skill for the named agent."""
+        role = self._resolve_role(role_identifier)
+        if not role or role == "orchestrator":
+            console.print(
+                f"[yellow]Unknown agent:[/yellow] {role_identifier}  "
+                "[dim]Use @name or role key (sam, jordan, casey, etc.)[/dim]"
+            )
+            return
+        persona = self.config["agent_personas"].get(role, {})
+        name = persona.get("name", role.upper())
+        path = self.memory.save_auto_skill(role, lesson.strip(), trigger="manual-feedback")
+        console.print(
+            f"\n[green]✓ Feedback saved to {name}'s skills:[/green]  [dim]{lesson.strip()}[/dim]\n"
+        )
+
     def _save_epic_plan_memory(self, user_input: str, agent_responses: dict):
         """
         After an epic/story kickoff, ask haiku to extract a structured plan summary
@@ -828,6 +1006,9 @@ class Orchestrator:
         self.db.save_message(self.project_name, "user", user_input)
         self.messages.append({"role": "user", "content": user_input})
 
+        # Detect user corrections and auto-save as agent skills (silent)
+        self._detect_and_save_correction(user_input)
+
         # Detect export/report generation intent (before teaching detection — more specific)
         export_match = self._detect_export_intent(user_input)
         if export_match:
@@ -1039,6 +1220,8 @@ class Orchestrator:
                     )
                     if outcomes:
                         phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                        # Auto-extract lessons from failures
+                        self._check_outcomes_for_lessons(role, outcomes)
 
                 # Auto-extract REMEMBER: markers
                 saved_count = self.memory.extract_and_save_memories(response, role)

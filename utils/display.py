@@ -284,6 +284,8 @@ class Display:
             "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
             "  [cyan]/tdd on|off|status[/cyan] Enable TDD mode — Casey writes tests first, Sam implements\n"
             "  [cyan]/tdd health <cmd>[/cyan]  Set the health check command run after every file write\n"
+            "  [cyan]/retrospective[/cyan]     Each agent reflects on the session and saves a lesson to their skills\n"
+            "  [cyan]/feedback <agent> <lesson>[/cyan]  Save a lesson directly to an agent's skills\n"
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
             "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"

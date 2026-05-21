@@ -266,6 +266,40 @@ class MemoryManager:
     # TDD mode — persists across sessions per project
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Auto-learning — lessons extracted from failures / corrections
+    # ------------------------------------------------------------------
+
+    def save_auto_skill(self, role: str, lesson: str, trigger: str = "auto") -> Path:
+        """
+        Append a lesson to the role's auto-learned skill file.
+        Lessons accumulate with a date + trigger header so the agent
+        can see when and why each lesson was captured.
+        """
+        from datetime import datetime
+        role_dir = self._skills_dir / role
+        role_dir.mkdir(parents=True, exist_ok=True)
+        path = role_dir / "auto-learned.md"
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        header = f"\n### [{timestamp}] via {trigger}\n"
+
+        if path.exists():
+            existing = path.read_text(encoding="utf-8")
+        else:
+            existing = f"# Auto-Learned Lessons — {role}\n\nLessons captured automatically from failures, corrections, and retrospectives.\n"
+
+        path.write_text(existing + header + lesson.strip() + "\n", encoding="utf-8")
+        self._entries_cache = None
+        return path
+
+    def load_auto_skills(self, role: str) -> str:
+        """Load the auto-learned lesson file for a role."""
+        path = self._skills_dir / role / "auto-learned.md"
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8").strip()
+
     def save_tdd_mode(self, enabled: bool, health_cmd: str = "") -> None:
         """Persist TDD mode flag and optional health-check command."""
         tdd_file = self.dynamic_dir / "tdd.txt"
