@@ -1,11 +1,22 @@
-## Skill: pip-venv-windows
+## HARD RULE: Never use uv — always use pip + venv
 
-- **Use pip and python -m venv exclusively on Windows**: Never use `uv`—it lacks proper Windows support. For all Python projects on Windows, use `pip` for package management and `python -m venv` for isolated environments. This is the standard and only supported approach.
+**`uv` is NOT installed on this machine. Any command using `uv` will fail with "not recognized as an internal or external command". Do not suggest it, do not use it, do not fall back to it.**
 
-- **Create and activate virtual environments correctly**: Execute `python -m venv venv`, then activate with `venv\Scripts\activate` (Command Prompt) or `venv\Scripts\Activate.ps1` (PowerShell). Verify activation by confirming `(venv)` appears in your terminal prompt before running any pip commands.
+### The only allowed Python workflow on this machine:
 
-- **Manage dependencies with pip and requirements.txt**: Install packages with `pip install <package>`. Lock versions using `pip freeze > requirements.txt`. Reproduce environments with `pip install -r requirements.txt`. Never mix package managers on the same project.
+1. **Create venv** (once per project): `python -m venv venv`
+2. **Install deps**: `venv\Scripts\python.exe -m pip install -r requirements.txt`
+3. **Run anything**: `venv\Scripts\python.exe -m pytest ...` or `venv\Scripts\python.exe script.py`
 
-- **Follow the standard Windows workflow**: (1) `python -m venv venv` → (2) Activate venv → (3) `pip install -r requirements.txt` → (4) Run Python scripts. This linear process is reliable and requires no special Windows configuration.
+### Never use:
+- `uv sync` ❌
+- `uv run` ❌
+- `uv pip` ❌
+- `venv\Scripts\activate` in a chained command (activation doesn't persist across `&&` on Windows) ❌
 
-- **Avoid all uv syntax and directives**: Don't use `uv run`, `uv sync`, `uv pip`, or uv-specific pyproject.toml entries. Stick strictly to pip commands and standard Python packaging. Any uv syntax will fail in Windows environments.
+### Always use instead:
+- `venv\Scripts\python.exe -m pytest tests/ -v` ✅
+- `venv\Scripts\python.exe -m pip install -r requirements.txt` ✅
+- `venv\Scripts\python.exe app/main.py` ✅
+
+If a venv already exists in the project folder, use it directly — do not recreate it.
