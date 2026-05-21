@@ -267,6 +267,10 @@ class Display:
             "  [cyan]@sam build the login page[/cyan]    — talk directly to one agent\n"
             "  [cyan]@jordan review the API design[/cyan]\n"
             "  Press [bold]Ctrl+C[/bold] at any time to interrupt a running agent\n\n"
+            "[bold]Pasting terminal output / multiline content[/bold]\n"
+            '  Type [bold]"""[/bold] to open paste mode, paste your content, '
+            'then type [bold]"""[/bold] alone to send it all as one message.\n'
+            "  Prevents pasted error output or test results from being processed line-by-line.\n\n"
             "[bold]General Chat (no project needed)[/bold]\n"
             "  Just start typing a question or sentence and the team will answer\n"
             "  without creating a project. History is saved as [dim]💬 general chat[/dim].\n"

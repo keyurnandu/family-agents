@@ -294,6 +294,36 @@ def main(project: str | None, list_projects: bool, model: str | None):
         if not user_input:
             continue
 
+        # ── Multiline paste mode ──────────────────────────────────────
+        # If the user types """ (alone or at the start of a line),
+        # collect all following lines until another """ — then submit
+        # the whole block as a single message. This prevents pasted
+        # terminal output (e.g. pytest results) from being processed
+        # line-by-line and consuming massive tokens.
+        if user_input == '"""' or user_input.startswith('"""') and len(user_input) == 3:
+            console.print(
+                "[dim]Paste mode — enter your content, then type [bold]\"\"\"[/bold] on its own line to send.[/dim]"
+            )
+            lines = []
+            if user_input[3:].strip():          # content after opening """
+                lines.append(user_input[3:].strip())
+            while True:
+                try:
+                    line = Prompt.ask("[dim]  ···[/dim]")
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[dim]Paste cancelled.[/dim]")
+                    lines = []
+                    break
+                if line.strip() == '"""':
+                    break
+                lines.append(line)
+            if not lines:
+                continue
+            user_input = "\n".join(lines)
+            console.print(
+                f"[dim]  Submitting {len(lines)} lines as one message…[/dim]\n"
+            )
+
         # ── No project open yet ───────────────────────────────────────
         if orchestrator is None:
             saved = db.list_projects()
