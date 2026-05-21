@@ -12,7 +12,9 @@ But real products get built by **teams** — a PM who defines scope, a BSA who c
 
 So I built that team. In AI. In a terminal.
 
-It's called **Family Agents** — and using it taught me more about product thinking than any course I've taken.
+It's called **Family Agents** — 8 AI specialists who collaborate on your project, enforce TDD automatically, and remember everything across sessions.
+
+Using it taught me more about product thinking than any course I've taken.
 
 Here's what I learned 👇
 
@@ -191,6 +193,55 @@ This was a **product scope** failure. We'd shipped codebase review, but only for
 
 ---
 
+### Friction 6: Quality problems accumulated silently — and nobody told you
+
+This one took a while to name correctly.
+
+Sam (the AI developer) was writing files. The user was approving them. Everything looked fine. But when they tried to run the project, there were 5 broken imports — each one only visible after fixing the previous one. Classic whack-a-mole.
+
+My first instinct was to blame Sam: *"the developer should check imports before writing."* The PM shift was realizing: **the product was not enforcing any quality gate.** There was nothing in the workflow that required the project to be in a clean, runnable state after each change. Sam had no feedback loop. The user had no visibility. Problems silently stacked up.
+
+This is exactly the problem TDD solves in real engineering teams. The discipline forces every change to be verified against a known standard before moving forward. No "I'll fix it later." No accumulation.
+
+**Product fix: TDD Mode** — a `/tdd on` command that permanently changes how the team works for that project:
+
+```
+You: /tdd on
+Health check command: venv\Scripts\python.exe -c "from app.main import app"
+
+✓ TDD mode ON
+Workflow: Casey writes failing tests → Sam implements → health check runs after every file write
+```
+
+Two things happen differently:
+
+**1. The workflow changes** — Aria now enforces a mandatory two-phase sequence for every implementation task:
+
+```
+Phase 1 → Casey (QA): write failing tests for the feature first
+Phase 2 → Sam (Dev): implement until Casey's tests pass
+```
+
+Tests exist before implementation. The team can't skip this. It's not a suggestion — it's baked into the routing.
+
+**2. A health check runs automatically** after every approved file write — no user action needed:
+
+```
+🧪 TDD health check running…  python -c "from app.main import app"
+  ✓ Health check passed
+
+  ✗ Health check FAILED
+  ImportError: cannot import name 'StepRunStatus' from 'app.models.test_case'
+```
+
+If it fails, the error surfaces immediately in context. Sam sees it and fixes it before writing the next file. **Broken imports never accumulate again.**
+
+The key product decision here: **enforce the process at the system level, not by hoping the user remembers.** Developers — human or AI — cut corners under time pressure. The product's job is to make the right behavior the default behavior.
+
+TDD mode is saved to project memory and **persists across sessions**. Set it once, it runs forever. Switching projects restores that project's TDD settings automatically.
+
+---
+
 ## What I Shipped vs. What I Deferred
 
 PM thinking means making explicit trade-offs about scope. Here's what I consciously chose *not* to build (yet):
@@ -236,6 +287,7 @@ Not lines of code — product metrics:
 - **Supported project types:** Any stack (stack is auto-detected from the codebase)
 - **Sessions that require re-explaining the project:** Zero (memory persists automatically)
 - **Commands a new user needs to know to get started:** One (`python cli.py`)
+- **Broken imports caught before they accumulate:** Immediate — health check fires after every file write in TDD mode
 
 These are the numbers I optimized for. The 2,500 lines of Python behind them are just the means to those ends.
 
@@ -262,6 +314,14 @@ Users didn't ask for persistent memory. They asked for "the team to stop forgett
 ### 5. Ship the 80% and listen
 
 The codebase review feature shipped only working for 2-level deep folders. That was intentional — get the capability out, see how people actually use it, then extend. I found out about the depth problem by watching real usage, not by thinking about it in advance.
+
+### 6. Good process doesn't enforce itself — the product has to do it
+
+TDD is a well-known engineering practice. Every developer knows it exists. Almost nobody does it consistently, because nothing stops them from skipping it.
+
+The lesson: **knowing the right process and having the product enforce the right process are completely different things.** A PM's job isn't just to define what good looks like — it's to design the product so that good behavior is the path of least resistance. The `/tdd on` command doesn't teach anyone about TDD. It just makes skipping it impossible.
+
+This applies everywhere in product design. If users need to fill in a description field for quality, make it required — don't just add a tooltip. If onboarding requires 3 steps, complete step 1 for them automatically. Don't trust process to discipline; trust the product to enforce it.
 
 ---
 
