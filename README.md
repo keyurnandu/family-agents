@@ -143,6 +143,8 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/project` | Show project stats (messages, memory items, model) |
 | `/status` | Project snapshot — memory, files, token usage, docs |
 | `/export <type>` | Generate a doc (requirements, architecture, sprint-plan…) |
+| `/tdd on\|off\|status` | Toggle TDD mode — Casey writes tests first, Sam implements, health check runs after every write |
+| `/tdd health <cmd>` | Set the health check command (e.g. `python -c "from app.main import app"`) |
 | `/switch [name\|number]` | Switch to another project — case-insensitive, shows picker if no arg |
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
@@ -243,6 +245,68 @@ You: implement the login epic from the requirements
 ```
 
 The token bar turns yellow at 50% and red at 80% — a signal to consider `/clear` before the context window fills up.
+
+---
+
+## Test-Driven Development (TDD) Mode
+
+Enable TDD mode for a project and the team enforces the red-green loop automatically — no manual prompting needed.
+
+```
+/tdd on       # enable (prompts for a health check command)
+/tdd off      # disable
+/tdd status   # show current state
+/tdd health python -c "from app.main import app"   # update health check only
+```
+
+### What happens when TDD is on
+
+**Routing changes:** For every implementation task, Aria automatically creates two sequential phases:
+
+```
+Phase 1 — Write Tests    Casey writes failing tests for the feature
+               │  test files fed as context ↓
+Phase 2 — Implement      Sam implements until the tests pass
+```
+
+**After every approved file write**, the health check runs automatically:
+```
+🧪 TDD health check running…  python -c "from app.main import app"
+  ✓ Health check passed
+
+# or if it fails:
+  ✗ Health check FAILED
+  ImportError: cannot import name 'StepRunStatus' from 'app.models.test_case'
+```
+
+If the check fails, the output is shown immediately so Sam can fix the broken import before moving on — breaking imports never accumulate.
+
+### Health check command
+
+Set it to whatever verifies your project is in a clean state:
+
+| Project type | Suggested command |
+|---|---|
+| Python / FastAPI | `venv\Scripts\python.exe -c "from app.main import app"` |
+| Python / any | `venv\Scripts\python.exe -m pytest --collect-only -q` |
+| Node.js | `npm test -- --passWithNoTests` |
+| Generic import | `python -c "import mymodule"` |
+
+The command is saved to project memory and **persists across sessions** — set it once, it runs forever until you change it.
+
+### TDD is per-project
+
+Each project has its own TDD mode and health check command. Switching projects restores that project's TDD settings automatically.
+
+### `/tdd status` output
+
+```
+TDD Mode: ON
+Health check: venv\Scripts\python.exe -c "from app.main import app"
+Workflow: Casey writes tests first → Sam implements → health check runs after every file write
+```
+
+The `/status` command also shows TDD mode in the project snapshot.
 
 ---
 

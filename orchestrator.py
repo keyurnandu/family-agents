@@ -377,6 +377,23 @@ class Orchestrator:
             if r not in self.active_roster
         ]
 
+        # TDD mode context — injected into routing when active
+        tdd_enabled, tdd_health_cmd = self.memory.load_tdd_mode()
+        tdd_section = ""
+        if tdd_enabled:
+            tdd_section = (
+                "## TDD MODE IS ACTIVE\n"
+                "For ANY implementation task (writing code, adding features, fixing bugs, "
+                "implementing epics/stories):\n"
+                "- ALWAYS create TWO sequential phases:\n"
+                "  Phase 1 — 'Write Tests': assign qa (Casey) to write failing tests FIRST\n"
+                "  Phase 2 — 'Implement': assign developer (Sam) to implement until tests pass\n"
+                "- Never collapse these into a single phase.\n"
+                "- Casey's task must be: write the test file(s) for [feature] — no implementation yet.\n"
+                "- Sam's task must reference Casey's tests: implement [feature] so Casey's tests pass.\n"
+                "- For non-implementation tasks (questions, reviews, planning) use normal routing.\n\n"
+            )
+
         return (
             f"You are Aria, the project coordinator for '{self.project_name}'. "
             "Your ONLY job here is to decide which agents to involve and what to ask each one.\n\n"
@@ -384,6 +401,7 @@ class Orchestrator:
             + (f"## Available to Add\n{', '.join(available)}\n\n" if available else "")
             + (f"## Recent Project Memory\n{project_memory}\n\n" if project_memory else "")
             + (f"## Existing Documents\n{doc_index}\n\n" if doc_index else "")
+            + tdd_section
             + "## Routing Rules\n"
             "- Use sequential PHASES only when tasks genuinely depend on each other "
             "(requirements → implementation → QA → devops).\n"
@@ -939,6 +957,10 @@ class Orchestrator:
         project_dir = self.base_dir / "projects" / self.project_name
         project_dir.mkdir(parents=True, exist_ok=True)
 
+        # TDD config for this process() call — read once, passed to all file writes
+        _tdd_enabled, _tdd_health_cmd = self.memory.load_tdd_mode()
+        _tdd_cwd = self.loaded_path if self.loaded_path else project_dir
+
         import threading
         # Shared file cache + lock — populated lazily per phase.
         # All agents in the same phase share this so each file is read from disk once.
@@ -1009,7 +1031,12 @@ class Orchestrator:
                 actions = parse_actions(response, name)
                 if actions:
                     write_dir = self.loaded_path if self.loaded_path else project_dir
-                    outcomes = prompt_and_execute(actions, write_dir)
+                    outcomes = prompt_and_execute(
+                        actions,
+                        write_dir,
+                        tdd_health_cmd=_tdd_health_cmd if _tdd_enabled else None,
+                        tdd_cwd=_tdd_cwd,
+                    )
                     if outcomes:
                         phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
 
@@ -1316,6 +1343,7 @@ class Orchestrator:
         total_skills = sum(skill_counts.values())
         # Session stats
         stats = get_session_stats()
+        tdd_enabled, tdd_health_cmd = self.memory.load_tdd_mode()
         self.display.show_status(
             project_name=self.project_name,
             info=info,
@@ -1327,6 +1355,8 @@ class Orchestrator:
             category_counts=category_counts,
             total_skills=total_skills,
             session_stats=stats,
+            tdd_enabled=tdd_enabled,
+            tdd_health_cmd=tdd_health_cmd,
         )
 
     def _detect_export_intent(self, user_input: str) -> tuple[str, str] | None:

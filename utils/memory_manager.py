@@ -261,3 +261,22 @@ class MemoryManager:
         if not role_dir.exists():
             return 0
         return len(list(role_dir.glob("*.md")))
+
+    # ------------------------------------------------------------------
+    # TDD mode — persists across sessions per project
+    # ------------------------------------------------------------------
+
+    def save_tdd_mode(self, enabled: bool, health_cmd: str = "") -> None:
+        """Persist TDD mode flag and optional health-check command."""
+        tdd_file = self.dynamic_dir / "tdd.txt"
+        tdd_file.write_text(f"{int(enabled)}\n{health_cmd.strip()}", encoding="utf-8")
+
+    def load_tdd_mode(self) -> tuple[bool, str]:
+        """Return (enabled, health_check_cmd). Defaults to (False, '')."""
+        tdd_file = self.dynamic_dir / "tdd.txt"
+        if not tdd_file.exists():
+            return False, ""
+        lines = tdd_file.read_text(encoding="utf-8").splitlines()
+        enabled = lines[0].strip() == "1" if lines else False
+        health_cmd = lines[1].strip() if len(lines) > 1 else ""
+        return enabled, health_cmd

@@ -140,7 +140,36 @@ def _show_bash_action(action: Action):
     )
 
 
-def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
+def run_health_check(cmd: str, cwd: Path) -> tuple[bool, str]:
+    """
+    Run a health-check command (e.g. import check or pytest --collect-only).
+    Returns (passed, output_text).
+    """
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+        output = (result.stdout + result.stderr).strip()
+        return result.returncode == 0, output
+    except subprocess.TimeoutExpired:
+        return False, "Health check timed out after 60 seconds."
+    except Exception as e:
+        return False, f"Health check error: {e}"
+
+
+def prompt_and_execute(
+    actions: list[Action],
+    project_dir: Path,
+    tdd_health_cmd: str | None = None,
+    tdd_cwd: Path | None = None,
+) -> list[str]:
     """
     File changes: show a compact summary with diff stats, one 'apply all?' prompt.
     If the user types 'd' at the prompt, the full diff is shown before re-asking.
@@ -253,6 +282,25 @@ def prompt_and_execute(actions: list[Action], project_dir: Path) -> list[str]:
                     )
                 outcomes.append(f"FILE WRITTEN: {a.label}")
             console.print()
+
+            # ── TDD health check — runs automatically after every approved write ──
+            if tdd_health_cmd:
+                check_dir = tdd_cwd or project_dir
+                console.print(
+                    f"[dim cyan]🧪 TDD health check running…[/dim cyan]  "
+                    f"[dim]{tdd_health_cmd[:80]}[/dim]"
+                )
+                passed, output = run_health_check(tdd_health_cmd, check_dir)
+                if passed:
+                    console.print("  [bold green]✓ Health check passed[/bold green]\n")
+                    outcomes.append("HEALTH_CHECK: PASSED")
+                else:
+                    console.print("  [bold red]✗ Health check FAILED[/bold red]")
+                    # Show last 20 lines of output — enough for the agent to diagnose
+                    lines = output.splitlines()
+                    snippet = "\n".join(lines[-20:]) if len(lines) > 20 else output
+                    console.print(f"[dim red]{snippet}[/dim red]\n")
+                    outcomes.append(f"HEALTH_CHECK: FAILED\n{snippet}")
         else:
             console.print("  [dim]Changes skipped.[/dim]\n")
             for a in file_actions:

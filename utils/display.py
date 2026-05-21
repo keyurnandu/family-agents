@@ -123,7 +123,8 @@ class Display:
     def show_status(self, project_name: str, info: dict | None, active_roster: list,
                     model: str, real_files: list, doc_files: list,
                     memory_entries: list, category_counts: dict,
-                    total_skills: int, session_stats: dict):
+                    total_skills: int, session_stats: dict,
+                    tdd_enabled: bool = False, tdd_health_cmd: str = ""):
         from rich.panel import Panel
         from pathlib import Path
 
@@ -152,10 +153,16 @@ class Display:
         mem_parts = [f"[cyan]{cat}[/cyan] {n}" for cat, n in category_counts.items()]
         mem_line = "  ".join(mem_parts) if mem_parts else "[dim]none yet[/dim]"
 
+        tdd_line = (
+            "[bold green]ON[/bold green]"
+            + (f"  [dim]health: {tdd_health_cmd[:60]}[/dim]" if tdd_health_cmd else "  [dim]no health check[/dim]")
+            if tdd_enabled else "[dim]OFF[/dim]"
+        )
         lines = [
             f"[bold]Project:[/bold]  {project_name}",
             f"[bold]Messages:[/bold] {msg_count}  ·  Last active: [dim]{last_active}[/dim]",
             f"[bold]Team:[/bold]     {' · '.join(active_roster)}  [dim](model: {model})[/dim]",
+            f"[bold]TDD:[/bold]      {tdd_line}",
             f"[bold]Skills:[/bold]   {total_skills} total across team",
             "",
             f"[bold]Memory[/bold] ({len(memory_entries)} items)",
@@ -275,6 +282,8 @@ class Display:
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"
             "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
+            "  [cyan]/tdd on|off|status[/cyan] Enable TDD mode — Casey writes tests first, Sam implements\n"
+            "  [cyan]/tdd health <cmd>[/cyan]  Set the health check command run after every file write\n"
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
             "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"

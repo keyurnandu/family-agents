@@ -450,6 +450,104 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 else:
                     orchestrator.export_doc(doc_type)
 
+            elif parts[0] == "/tdd":
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                tdd_enabled, tdd_health_cmd = orchestrator.memory.load_tdd_mode()
+
+                if not arg or arg == "status":
+                    status_label = "[bold green]ON[/bold green]" if tdd_enabled else "[dim]OFF[/dim]"
+                    console.print(f"\n[bold]TDD Mode:[/bold] {status_label}")
+                    if tdd_enabled:
+                        if tdd_health_cmd:
+                            console.print(f"[dim]Health check:[/dim] [cyan]{tdd_health_cmd}[/cyan]")
+                        else:
+                            console.print("[dim]Health check: not set — use [cyan]/tdd health <cmd>[/cyan] to add one[/dim]")
+                        console.print(
+                            "[dim]Workflow: Casey writes tests first → Sam implements → "
+                            "health check runs after every file write[/dim]"
+                        )
+                    console.print()
+
+                elif arg == "on":
+                    # Auto-suggest a health check command based on the loaded codebase
+                    suggested = ""
+                    if orchestrator.loaded_path:
+                        lp = orchestrator.loaded_path
+                        if (lp / "venv" / "Scripts" / "python.exe").exists():
+                            py = r"venv\Scripts\python.exe"
+                        elif (lp / "venv" / "bin" / "python").exists():
+                            py = "venv/bin/python"
+                        else:
+                            py = "python"
+                        # Suggest import check for Python projects
+                        if (lp / "app" / "main.py").exists():
+                            suggested = f'{py} -c "from app.main import app"'
+                        elif (lp / "src" / "main.py").exists():
+                            suggested = f'{py} -c "import src.main"'
+                        elif (lp / "requirements.txt").exists() or (lp / "pyproject.toml").exists():
+                            suggested = f"{py} -m pytest --collect-only -q"
+                        elif (lp / "package.json").exists():
+                            suggested = "npm test -- --passWithNoTests"
+                    # Prompt for health check command
+                    hint = f" [dim](Enter for: {suggested})[/dim]" if suggested else " [dim](Enter to skip)[/dim]"
+                    try:
+                        new_cmd = Prompt.ask(
+                            f"[bold cyan]Health check command[/bold cyan]{hint}"
+                        ).strip()
+                    except (KeyboardInterrupt, EOFError):
+                        console.print("\n[dim]Cancelled.[/dim]")
+                        continue
+                    if not new_cmd and suggested:
+                        new_cmd = suggested
+                    orchestrator.memory.save_tdd_mode(True, new_cmd)
+                    # Add qa to the team if not already there
+                    if "qa" not in orchestrator.active_roster and "qa" in orchestrator.agents:
+                        orchestrator.active_roster.append("qa")
+                        qa_p = config["agent_personas"].get("qa", {})
+                        console.print(
+                            f"[green]+ {qa_p.get('emoji','')} Casey (qa) added to team[/green]  "
+                            "[dim]— TDD requires a QA engineer[/dim]"
+                        )
+                    console.print(f"\n[bold green]✓ TDD mode ON[/bold green]")
+                    console.print(
+                        "[dim]Workflow: Casey writes failing tests → Sam implements → "
+                        "health check runs after every approved file write[/dim]"
+                    )
+                    if new_cmd:
+                        console.print(f"[dim]Health check: [cyan]{new_cmd}[/cyan][/dim]")
+                    else:
+                        console.print("[dim]No health check set — TDD routing active, no auto-check[/dim]")
+                    console.print()
+
+                elif arg == "off":
+                    orchestrator.memory.save_tdd_mode(False, tdd_health_cmd)
+                    console.print("\n[dim]TDD mode OFF — normal routing restored.[/dim]\n")
+
+                elif arg.startswith("health"):
+                    # /tdd health <cmd> — update just the health check command
+                    raw_sub = raw_parts[1].strip() if len(raw_parts) > 1 else ""
+                    new_cmd = raw_sub[len("health"):].strip() if raw_sub.lower().startswith("health") else ""
+                    if not new_cmd:
+                        try:
+                            new_cmd = Prompt.ask("[bold cyan]New health check command[/bold cyan]").strip()
+                        except (KeyboardInterrupt, EOFError):
+                            console.print("\n[dim]Cancelled.[/dim]")
+                            continue
+                    if new_cmd:
+                        orchestrator.memory.save_tdd_mode(tdd_enabled, new_cmd)
+                        console.print(f"\n[green]✓ Health check updated:[/green] [cyan]{new_cmd}[/cyan]\n")
+                    else:
+                        console.print("[dim]No change.[/dim]")
+
+                else:
+                    console.print(
+                        "[dim]Usage:\n"
+                        "  /tdd on              — enable TDD mode (prompts for health check)\n"
+                        "  /tdd off             — disable TDD mode\n"
+                        "  /tdd status          — show current TDD settings\n"
+                        "  /tdd health <cmd>    — update the health check command[/dim]"
+                    )
+
             elif parts[0] == "/skill":
                 sub = (parts[1] if len(parts) > 1 else "").split(None, 2)
                 action = sub[0] if sub else ""
