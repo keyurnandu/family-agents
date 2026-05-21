@@ -143,7 +143,7 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/project` | Show project stats (messages, memory items, model) |
 | `/status` | Project snapshot — memory, files, token usage, docs |
 | `/export <type>` | Generate a doc (requirements, architecture, sprint-plan…) |
-| `/switch [name\|number]` | Switch to another project — shows picker if no arg |
+| `/switch [name\|number]` | Switch to another project — case-insensitive, shows picker if no arg |
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
