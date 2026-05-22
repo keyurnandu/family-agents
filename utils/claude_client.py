@@ -26,12 +26,18 @@ def reset_session_stats() -> None:
     _session_stats.update(calls=0, input_chars=0, output_chars=0)
 
 
+_cli_checked = False
+
 def _check_cli():
+    global _cli_checked
+    if _cli_checked:
+        return
     if not shutil.which("claude"):
         raise RuntimeError(
             "claude CLI not found in PATH.\n"
             "Install Claude Code from https://claude.ai/code and log in once."
         )
+    _cli_checked = True
 
 
 def call_claude(

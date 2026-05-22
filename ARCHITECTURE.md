@@ -52,7 +52,7 @@ flowchart TD
 
         PSUM -->|context for next phase| PH
 
-        PH -->|all phases done| SYNTH[6 · Synthesis\n_trim_for_synthesis\nstrips EXEC + condenses OUTPUT\nAria writes final summary]
+        PH -->|all phases done| SYNTH[6 · Synthesis\n_trim_for_synthesis\nstrips EXEC + condenses OUTPUT\nper-agent cap 1600 chars\nAria writes final summary]
 
         SYNTH --> DISP[Display to user\n+ token bar\n% of safe_context_tokens\ndefault 200k]
     end
@@ -63,11 +63,11 @@ flowchart TD
 
         AG_CALL --> PCACHE{Prompt cache hit?\nkey = role · project\n· mem_count · skills_mtime\n· codebase_hash}
 
-        PCACHE -->|miss| BUILD_SP[Build system prompt\n① role guide  memory/roles/role.md\n② role-filtered memory\n   PM/BSA → requirements+decisions\n   Dev/Lead → technical+decisions\n③ skills files  auto-learned.md\n④ codebase context if loaded\n⑤ per-turn docs injected]
+        PCACHE -->|miss| BUILD_SP[Build system prompt\n① role guide  memory/roles/role.md\n② role-filtered memory\n   PM/BSA → requirements+decisions\n   Dev/Lead → technical+decisions\n③ EXEC instructions for impl roles\n④ skills files  auto-learned.md\n⑤ codebase context if loaded\n⑥ per-turn docs injected]
 
         PCACHE -->|hit| CLAUDE_CALL
 
-        BUILD_SP --> STORE_CACHE[Store in Agent._prompt_cache\nclass-level dict]
+        BUILD_SP --> STORE_CACHE[Store in Agent._prompt_cache\nclass-level dict · LRU cap=20]
         STORE_CACHE --> CLAUDE_CALL
 
         CLAUDE_CALL[claude --print subprocess\nprompt via stdin\nno API key needed]
@@ -120,14 +120,14 @@ flowchart TD
 
         IV[Intent verification\nheuristic: asked for code → got prose?\n→ surface warning to user]
 
-        PS_UPDATE[_update_project_state\nbackground daemon thread\nHaiku writes state.md after every turn\n— what exists · in progress · decisions · next steps]
+        PS_UPDATE[_update_project_state\nbackground daemon thread + _state_lock\nHaiku writes state.md after every turn\n— what exists · in progress · decisions · next steps]
 
         PS_READ[_load_project_state\nread state.md → _turn_state\ninjected into routing prompt + synthesis\nso next turn Aria reasons from facts not inference]
     end
 
     %% ─────────────────────────────────────────────
     subgraph MEM["🗄️  Memory Layer"]
-        DB[(SQLite\ndb_manager.py\nprojects · messages\ntimestamps)]
+        DB[(SQLite\ndb_manager.py\npersistent connection\nprojects · messages\ntimestamps)]
 
         MD_MEM[(memory/dynamic/project/\nmemory.md\ndecisions · requirements\ntechnical · notes · epic-plans)]
 
@@ -189,7 +189,7 @@ flowchart TD
 |---|---|
 | **No SDK / API key** | All LLM calls go through `claude --print` subprocess; prompt via stdin (bypasses 32k Windows cmd limit) |
 | **Parallel execution** | Agents within a phase run in `ThreadPoolExecutor`; phases are sequential so dev always has requirements first |
-| **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash` — rebuilds only when something actually changes |
+| **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash` — rebuilds only when something actually changes; capped at 20 entries with LRU eviction |
 | **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd`, `_turn_state` loaded once at the start of `process()` — not re-loaded for every agent call |
 | **Role-filtered memory** | PM/BSA see requirements+decisions; Dev/Lead see technical+decisions — no agent reads irrelevant categories |
 | **Bash output capture** | `capture_output=True` → printed to terminal AND injected into outcomes so agents can reason about test results |
@@ -197,8 +197,17 @@ flowchart TD
 | **Safe context** | Token bar shows `session_tokens / safe_context_tokens` (configurable in `settings.yaml`, default 200k) |
 | **TDD mode** | Health check runs automatically after every approved file write; failure feeds directly into lesson extraction |
 | **Phase summaries** | Split at `ACTIONS TAKEN:` boundary — narrative capped at 800 chars, actions block at 1500 chars — prevents long agent responses from burying action data |
-| **Project state** | `state.md` updated by Haiku in a background thread after every turn — Aria reads it at turn-start so routing and synthesis reason from a structured snapshot, not raw conversation inference |
+| **Project state** | `state.md` updated by Haiku in a background thread after every turn (guarded by `_state_lock`) — Aria reads it at turn-start so routing and synthesis reason from a structured snapshot, not raw conversation inference |
 | **Clarification gate** | Pre-filter (large-build regex + word count + low context) then one Haiku JSON call — asks one question before wasting a phase on the wrong interpretation |
 | **Bench agents** | Routing schema allows any agent; phase executor announces and pulls in bench roles without requiring `/add` — then they return to bench after the phase |
 | **Confidence escalation** | If Haiku routing produces a thin plan (≤1 agent, <60 char task) on a long message, automatically re-runs with Sonnet |
 | **Intent verification** | Heuristic check — user asked for code but agents produced only prose → surface a clear warning with suggested action |
+| **Synthesis per-agent cap** | Each agent response truncated to 1600 chars before synthesis — prevents a single verbose agent from blowing up Aria's context window |
+| **Persistent DB connection** | `DBManager` opens one SQLite connection on init and reuses it — no per-query open/close overhead |
+| **CLI check cache** | `claude` binary existence verified once per process via `shutil.which()` — subsequent calls skip the check |
+| **Module-level regexes** | All hot-path regexes (`_CODE_TASK_RE`, `_IMPL_RE`, `_CORRECTION_RE`, etc.) compiled once at module load — zero per-call compilation cost |
+| **Config pass-through** | `settings.yaml` parsed once in `cli.py` and passed as a dict — Orchestrator never re-reads YAML |
+| **Shared EXEC instructions** | The "Executing Actions" prompt block defined once as `_EXEC_INSTRUCTIONS` in `agent.py` — injected only for implementation roles (`developer`, `lead`, `qa`, `devops`); non-impl roles never see it |
+| **Single-pass file count** | `build_tree()` counts files as it walks the directory tree — no separate `rglob("*")` traversal |
+| **Hash-based memory dedup** | `save_project_memory()` compares full normalized content against parsed entries — replaces fragile `[:60]` substring check that caused false positives |
+| **Test suite** | 65 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |

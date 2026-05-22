@@ -75,10 +75,11 @@ class MemoryManager:
         else:
             existing = f"# Project Memory: {self.project_name}\n\n"
 
-        # Deduplicate: skip if same content already saved
+        # Deduplicate: skip if identical content already saved
         normalized = content.strip().lower()
-        if normalized[:60] in existing.lower():
-            return False
+        for entry in self.list_memory_entries():
+            if entry["content"].strip().lower() == normalized:
+                return False
 
         entry = f"\n### [{category.upper()}] — {timestamp} (via {source})\n{content.strip()}\n"
         memory_file.write_text(existing + entry, encoding="utf-8")

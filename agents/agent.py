@@ -11,6 +11,27 @@ if TYPE_CHECKING:
 
 ALL_ROLES = ["pm", "bsa", "developer", "lead", "researcher", "qa", "devops"]
 
+_CODE_TASK_RE = re.compile(
+    r"\b(?:implement|code|refactor|debug|fix|read|file|class|function|method|"
+    r"import|test|review|write|create|update|edit|change|add|remove|deploy|"
+    r"build|run|epic|story|sprint|feature|bug|error|stack|module|api|endpoint)\b",
+    re.IGNORECASE,
+)
+
+_IMPL_RE = re.compile(
+    r"\b(?:implement|write|create|build|add|fix|refactor|update|modify|"
+    r"change|work\s+on|complete|finish|do|start|begin|tackle|wire|"
+    r"integrate|connect|hook\s+up|configure|set\s+up|apply|generate|"
+    r"epic|story|sprint|feature|us-e\d|e\d-\d)\b",
+    re.IGNORECASE,
+)
+
+_FULL_FILE_RE = re.compile(
+    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in|"
+    r"review|audit|check|analyse|analyze|inspect|examine|read\s+through)\b",
+    re.IGNORECASE,
+)
+
 # Memory categories each role actually needs — avoids injecting irrelevant entries.
 # "note" and "decision" are cross-cutting and go to everyone.
 # "requirement" is for planning roles; "technical"/"epic-plan" for builders.
@@ -23,6 +44,22 @@ _ROLE_MEMORY_CATEGORIES: dict[str, set[str]] = {
     "qa":         {"note", "decision", "technical", "epic-plan"},
     "devops":     {"note", "decision", "technical"},
 }
+
+_IMPL_ROLES = {"developer", "lead", "qa", "devops"}
+
+_EXEC_INSTRUCTIONS = (
+    "## Executing Actions\n"
+    "When you want to create or modify a file, or run a shell command, use these exact tags "
+    "so the system can ask the customer for permission before executing:\n\n"
+    "Create / overwrite a file:\n"
+    "```\nEXEC:file:path/to/file\n```\n<file content here>\n```\n\n"
+    "Run a shell command:\n"
+    "```\nEXEC:bash\n```\n<commands>\n```\n\n"
+    "The customer will see a preview and approve or deny each action.\n\n"
+    "When you need to run tests, **always** use EXEC:bash — never ask the customer "
+    "to run them manually. The system captures the full output and feeds it back into "
+    "your context so you can read the results and act on them."
+)
 
 
 class Agent:
@@ -52,6 +89,7 @@ class Agent:
     # System prompt cache — rebuilt only when memory/skills change
     # ------------------------------------------------------------------
     _prompt_cache: dict = {}   # class-level; keyed by (role, project, cache_key)
+    _PROMPT_CACHE_MAX = 20
 
     def _prompt_cache_key(self) -> str:
         """Cache key: memory entry count + skills mtime + codebase content hash.
@@ -128,6 +166,8 @@ class Agent:
             role_memory,
             project_section,
         ]
+        if self.role in _IMPL_ROLES:
+            sections.append(_EXEC_INSTRUCTIONS)
         if skills_text:
             sections.append(f"## Additional Skills & Expertise\n{skills_text}")
 
@@ -141,12 +181,6 @@ class Agent:
         if self.orchestrator:
             ctx = getattr(self.orchestrator, "codebase_context", {})
             if loaded_path and ctx:
-                _CODE_TASK_RE = re.compile(
-                    r"\b(?:implement|code|refactor|debug|fix|read|file|class|function|method|"
-                    r"import|test|review|write|create|update|edit|change|add|remove|deploy|"
-                    r"build|run|epic|story|sprint|feature|bug|error|stack|module|api|endpoint)\b",
-                    re.IGNORECASE,
-                )
                 is_code_task = bool(_CODE_TASK_RE.search(task)) if task else True
 
                 if is_code_task:
@@ -224,6 +258,9 @@ class Agent:
         result = "\n\n".join(sections)
         # Write to cache (keyed without task so it's reusable across calls)
         Agent._prompt_cache[full_key] = (result, str(loaded_path))
+        if len(Agent._prompt_cache) > Agent._PROMPT_CACHE_MAX:
+            oldest = next(iter(Agent._prompt_cache))
+            del Agent._prompt_cache[oldest]
         return result
 
     def _get_peer_input(self, colleague_role: str, question: str) -> str:
@@ -289,12 +326,7 @@ class Agent:
 
                 # Raise the limit when the task explicitly asks for the full/entire file
                 # OR when the task is a review/audit — reviews need the whole file to be useful.
-                _FULL_RE = re.compile(
-                    r"\b(?:full|entire|complete|whole|all\s+of|everything\s+in|"
-                    r"review|audit|check|analyse|analyze|inspect|examine|read\s+through)\b",
-                    re.IGNORECASE,
-                )
-                want_full = bool(_FULL_RE.search(task))
+                want_full = bool(_FULL_FILE_RE.search(task))
                 cfg = getattr(self.orchestrator, "config", {}) if self.orchestrator else {}
                 _default_limit = cfg.get("max_read_file_chars", 20_000)
                 READ_FILE_LIMIT = None if want_full else _default_limit
@@ -391,13 +423,6 @@ class Agent:
                     )
                     # Detect intent: implementation tasks must output EXEC blocks now.
                     # Read/review tasks get the short-summary instruction.
-                    _IMPL_RE = re.compile(
-                        r"\b(?:implement|write|create|build|add|fix|refactor|update|modify|"
-                        r"change|work\s+on|complete|finish|do|start|begin|tackle|wire|"
-                        r"integrate|connect|hook\s+up|configure|set\s+up|apply|generate|"
-                        r"epic|story|sprint|feature|us-e\d|e\d-\d)\b",
-                        re.IGNORECASE,
-                    )
                     is_impl_task = bool(_IMPL_RE.search(task))
 
                     if is_impl_task:

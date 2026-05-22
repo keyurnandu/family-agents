@@ -52,3 +52,15 @@ Before running pytest, ensure that `RunnerContractError` is defined and exported
 
 ### [2026-05-21 19:33] via bash-failure
 Before merging constructor changes, run `pytest tests/runner/ -v` to catch signature mismatches. The `TypeError: __init__() got an unexpected keyword argument 'browser'` pattern means the implementation API doesn't match test expectations.
+
+### [2026-05-22 10:23] via lesson
+Before running `pytest`, verify test imports by checking that imported classes exist in source modules — use `grep 'RunnerNotFoundError' app/services/runner/factory.py` to catch import errors before test collection.
+
+### [2026-05-22 10:27] via lesson
+Always use `pytest --tb=long` when seeing multiple ERROR lines in test output, as `--tb=short` truncates the actual AttributeError causing test collection to fail. Scroll to the top of the output or run `pytest --collect-only` to see the root import/setup error before debugging individual test logic.
+
+### [2026-05-22 10:40] via lesson
+Before running pytest, verify that all classes and functions imported in test files actually exist in their source modules—use grep to check test imports against module contents.
+
+### [2026-05-22 10:53] via lesson
+Always initialize runners in pytest fixtures before tests execute; add `await runner.initialize()` calls to conftest.py setup methods to prevent `RunnerNotInitializedError` across Playwright and Selenium test suites.

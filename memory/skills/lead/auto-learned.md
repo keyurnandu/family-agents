@@ -25,3 +25,15 @@ Before running `uv run pytest`, always execute `uv sync` to ensure the UV enviro
 
 ### [2026-05-21 19:29] via bash-failure
 Before running `uv run pytest`, always run `uv sync` to ensure the environment and dependencies are properly initialized.
+
+### [2026-05-22 10:28] via lesson
+Never run the complete test suite when investigating failures—run tests for changed modules first (e.g., `pytest tests/test_runner*.py`) to isolate root causes before running all 331 tests. With 129 failures across multiple modules, selective runs identify which changes broke what, faster.
+
+### [2026-05-22 10:49] via lesson
+Always run `uv run` immediately after modifying factory.py or runner base classes — parameter type mismatches (dict vs string in `get_runner()`) cascaded across 17 tests because the changes weren't validated before commit.
+
+### [2026-05-22 10:51] via lesson
+Always ensure Selenium/Playwright browser instances are properly closed in test teardown—use context managers or explicit `driver.quit()`/`browser.close()` in fixtures to prevent "unclosed transport" and "closed pipe" failures. Before relying on `--tb=short`, run with default traceback when debugging to surface the actual assertion/execution errors hidden by these cleanup warnings.
+
+### [2026-05-22 10:54] via lesson
+Never run `uv run pytest tests/runner/ -q` when debugging failures; use `-v --tb=short` to see actual error tracebacks instead of just failure counts.

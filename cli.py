@@ -111,7 +111,7 @@ def _show_startup_hint(saved: list) -> None:
         )
 
 
-def _open_project(name: str, db, display, model, force_new: bool = False):
+def _open_project(name: str, db, display, model, force_new: bool = False, config: dict | None = None):
     """
     Initialise a project by name and return a ready Orchestrator.
     The _general workspace opens silently with no project-folder noise.
@@ -150,6 +150,7 @@ def _open_project(name: str, db, display, model, force_new: bool = False):
         db=db,
         display=display,
         model_override=model,
+        config=config,
     )
 
     # ── Auto-reload codebase from the previous session (no prompt) ────
@@ -274,7 +275,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
     # ── python cli.py --project <name>: skip straight in ─────────────
     if current_project:
-        orchestrator = _open_project(current_project, db, display, model)
+        orchestrator = _open_project(current_project, db, display, model, config=config)
         if current_project != GENERAL:
             console.print(
                 "[dim]Describe your project or ask the team anything. "
@@ -351,12 +352,12 @@ def main(project: str | None, list_projects: bool, model: str | None):
                         )
                     else:
                         current_project = GENERAL
-                    orchestrator = _open_project(current_project, db, display, model)
+                    orchestrator = _open_project(current_project, db, display, model, config=config)
                     # fall through to the in-session command handler below
 
                 elif cmd_lower == "/unload":
                     current_project = GENERAL
-                    orchestrator = _open_project(GENERAL, db, display, model)
+                    orchestrator = _open_project(GENERAL, db, display, model, config=config)
                     # fall through to the in-session command handler below
 
                 else:
@@ -369,7 +370,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     "[dim]💬 Routing to general chat (no project open)…[/dim]"
                 )
                 current_project = GENERAL
-                orchestrator = _open_project(GENERAL, db, display, model)
+                orchestrator = _open_project(GENERAL, db, display, model, config=config)
                 # fall through to @mention handler below
 
             # Chat input → auto-open general workspace
@@ -379,7 +380,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     "[bold]/switch[/bold] to open a project anytime.[/dim]"
                 )
                 current_project = GENERAL
-                orchestrator = _open_project(GENERAL, db, display, model)
+                orchestrator = _open_project(GENERAL, db, display, model, config=config)
                 # fall through to regular message handler below
 
             else:
@@ -393,7 +394,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     continue  # bad number — error already printed
 
                 current_project = name
-                orchestrator = _open_project(current_project, db, display, model)
+                orchestrator = _open_project(current_project, db, display, model, config=config)
                 continue
 
         # ── Inside a project or general chat: slash commands ──────────
@@ -749,7 +750,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 label = "💬 general chat" if current_project == GENERAL else f"[bold]{current_project}[/bold]"
                 console.print(f"\n[dim]Leaving {label} — session saved.[/dim]")
                 current_project = name
-                orchestrator = _open_project(current_project, db, display, model)
+                orchestrator = _open_project(current_project, db, display, model, config=config)
                 if current_project != GENERAL:
                     console.print(
                         "[dim]Describe your project or ask the team anything. "
@@ -771,7 +772,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                 label = "💬 general chat" if current_project == GENERAL else f"[bold]{current_project}[/bold]"
                 console.print(f"\n[dim]Leaving {label} — session saved.[/dim]")
                 current_project = name
-                orchestrator = _open_project(current_project, db, display, model, force_new=True)
+                orchestrator = _open_project(current_project, db, display, model, force_new=True, config=config)
 
             else:
                 console.print(

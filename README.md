@@ -42,6 +42,14 @@ cd family-agents
 pip install -r requirements.txt
 ```
 
+### Verify the installation
+
+```bash
+pytest
+```
+
+65 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation) without requiring an LLM connection.
+
 ---
 
 ## Usage
@@ -693,12 +701,27 @@ family-agents/
 ├── utils/
 │   ├── action_executor.py    # Permission-prompted file/command execution
 │   ├── claude_client.py      # Subprocess wrapper for `claude --print`
-│   ├── db_manager.py         # SQLite conversation history
-│   ├── memory_manager.py     # Project memory read/write
+│   ├── db_manager.py         # SQLite conversation history (persistent connection)
+│   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
+├── tests/                    # 65 tests — all TDD, run with `pytest`
+│   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
+│   ├── test_smoke.py         # Smoke test for fixture integrity
+│   ├── test_claude_client.py # CLI check caching
+│   ├── test_regexes.py       # Module-level regex validation
+│   ├── test_imports.py       # No inline imports, synthesis trimming
+│   ├── test_db_manager.py    # Persistent connection, CRUD operations
+│   ├── test_prompt_cache.py  # Cache eviction at cap
+│   ├── test_config_pass.py   # Config pass-through to Orchestrator
+│   ├── test_synthesis.py     # Per-agent response capping
+│   ├── test_memory_dedup.py  # Hash-based dedup, no false positives
+│   ├── test_build_tree.py    # Single-pass file counting
+│   ├── test_state_lock.py    # Threading lock on state updates
+│   └── test_role_trim.py     # Shared EXEC instructions, role file limits
 ├── config/
 │   └── settings.yaml         # Model, team roster, agent personas
-└── requirements.txt          # click, rich, pyyaml — no anthropic SDK
+├── pytest.ini                # Test configuration
+└── requirements.txt          # click, rich, pyyaml, pytest — no anthropic SDK
 ```
 
 > `db/`, `memory/dynamic/`, and `projects/*/` are excluded from git — they contain your local project data. The `projects/` folder itself is tracked so it exists on a fresh clone.
@@ -800,8 +823,18 @@ Several optimizations run automatically to keep token usage low:
 | **Routing prompt cache** | Aria's routing prompt rebuilt only when the team roster, memory, TDD state, or project state actually changes — not on every message |
 | **Role-filtered memory** | Each agent only receives memory categories relevant to their domain (PM/BSA skip technical entries; Developer/Lead skip requirement noise) |
 | **Synthesis output trimming** | Large pytest/bash output blocks condensed to a 3-line summary before Aria's synthesis call — saves 500–2000 tokens on code-heavy turns |
+| **Synthesis per-agent cap** | Each agent's response is capped at ~400 tokens (1600 chars) before being fed into synthesis — prevents a single verbose agent from dominating Aria's context |
 | **Batched lesson extraction** | Multiple failures in one turn produce a single haiku call for all lessons instead of one call per failure |
 | **Codebase content hash** | Agent system prompt cache invalidates correctly when files change on disk, not just when the path changes |
+| **Prompt cache eviction** | `Agent._prompt_cache` capped at 20 entries with LRU eviction — prevents unbounded memory growth across projects |
+| **Persistent DB connection** | Single SQLite connection reused for the session instead of opening/closing per query — eliminates repeated connection overhead |
+| **CLI check cache** | `claude` CLI existence verified once per process, not on every LLM call |
+| **Module-level regexes** | All frequently-used regexes compiled once at module load — not recompiled inside hot methods |
+| **Config pass-through** | `settings.yaml` parsed once at startup and passed to Orchestrator — no redundant YAML re-reads |
+| **Shared EXEC instructions** | The "Executing Actions" prompt section is defined once in code and injected only for implementation roles (developer, lead, qa, devops) — eliminated ~60 lines of duplication across role files |
+| **Single-pass file count** | `build_tree` counts files during its directory walk instead of a separate `rglob("*")` traversal |
+| **Thread-safe state updates** | Background `_update_project_state` protected by a threading lock — prevents concurrent writes from stomping on each other |
+| **Hash-based memory dedup** | Memory dedup compares full normalized content against parsed entries instead of a fragile 60-char substring check — no false positives on entries sharing a common prefix |
 
 ### How Aria routes smarter
 

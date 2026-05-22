@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
@@ -145,6 +146,35 @@ _FULL_FILE_RE = re.compile(
 )
 
 # Detects epic / story kickoff so a plan summary is saved to memory automatically
+_CORRECTION_RE = re.compile(
+    r"\b(?:stop|never|don'?t|do not|avoid|wrong|incorrect|"
+    r"you should(?:'ve| have)?|next time|always|instead of|"
+    r"that'?s (?:wrong|incorrect|not right)|"
+    r"should(?:'ve| have) (?:used?|done?|run|written?))\b",
+    re.IGNORECASE,
+)
+
+_CODE_REQUEST_RE = re.compile(
+    r"\b(?:write|create|build|implement|generate|make)\s+"
+    r"(?:a\s+|an\s+|the\s+)?(?:function|class|file|script|code|"
+    r"module|api|endpoint|component|service)\b",
+    re.IGNORECASE,
+)
+
+_CODEBASE_INTENT_RE = re.compile(
+    r"\b(?:review|read|show|open|check|audit|inspect|analyse|analyze|"
+    r"implement|write|fix|refactor|update|modify|change|edit|"
+    r"work\s+on|look\s+at|go\s+through|epic|story|sprint|feature|"
+    r"file|files|code|codebase|class|function|method|module|"
+    r"endpoint|api|service|controller|model|schema)\b",
+    re.IGNORECASE,
+)
+
+_FILE_ERROR_RE = re.compile(
+    r"^(?:I couldn't find|No codebase is currently loaded)",
+    re.IGNORECASE,
+)
+
 _EPIC_KICKOFF_RE = re.compile(
     r"\b(?:work\s+on|start|implement|begin|kick\s*off|tackle|do|complete|finish)\s+"
     r"(?:epic|story|e\d+|s\d+|sprint)",
@@ -177,14 +207,18 @@ class Orchestrator:
         db: DBManager,
         display: Display,
         model_override: Optional[str] = None,
+        config: Optional[dict] = None,
     ):
         self.project_name = project_name
         self.base_dir = base_dir
         self.db = db
         self.display = display
 
-        with open(base_dir / "config" / "settings.yaml", encoding="utf-8") as f:
-            self.config = yaml.safe_load(f)
+        if config is not None:
+            self.config = config
+        else:
+            with open(base_dir / "config" / "settings.yaml", encoding="utf-8") as f:
+                self.config = yaml.safe_load(f)
 
         self.model = model_override or self.config.get("model", "sonnet")
         self.memory = MemoryManager(base_dir, project_name)
@@ -245,6 +279,7 @@ class Orchestrator:
 
         # Per-turn project state (state.md) — loaded once, used in routing + synthesis
         self._turn_state: str = ""
+        self._state_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -271,9 +306,10 @@ class Orchestrator:
             "dist", "build", ".next", "target", ".gradle", ".idea", ".vscode",
         }
 
+        file_count = 0
+
         def build_tree(p: Path, prefix: str = "", depth: int = 0) -> list[str]:
-            if depth > 3:
-                return []
+            nonlocal file_count
             lines: list[str] = []
             try:
                 items = sorted(p.iterdir(), key=lambda x: (x.is_file(), x.name.lower()))
@@ -281,9 +317,12 @@ class Orchestrator:
                 return []
             visible = [i for i in items if i.name not in IGNORE and not i.name.startswith(".")]
             for idx, item in enumerate(visible):
-                connector = "└── " if idx == len(visible) - 1 else "├── "
-                lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
-                if item.is_dir() and depth < 3:
+                if depth <= 3:
+                    connector = "└── " if idx == len(visible) - 1 else "├── "
+                    lines.append(f"{prefix}{connector}{item.name}{'/' if item.is_dir() else ''}")
+                if item.is_file():
+                    file_count += 1
+                elif item.is_dir():
                     ext = "    " if idx == len(visible) - 1 else "│   "
                     lines.extend(build_tree(item, prefix + ext, depth + 1))
             return lines
@@ -338,17 +377,11 @@ class Orchestrator:
         if (path / "Dockerfile").exists():
             tech_stack.append("Docker")
 
-        IGNORE_COUNT = IGNORE | {".env"}
-        total_files = sum(
-            1 for f in path.rglob("*")
-            if f.is_file() and not any(ig in f.parts for ig in IGNORE_COUNT)
-        )
-
         return {
             "structure_tree": structure_tree,
             "key_files": key_file_contents,
             "tech_stack": tech_stack,
-            "total_files": total_files,
+            "total_files": file_count,
         }
 
     def _strip_exec_for_display(self, text: str) -> str:
@@ -568,19 +601,18 @@ class Orchestrator:
         - Condense large OUTPUT sections in ACTIONS TAKEN to a one-line summary
           (e.g. "25 passed in 3.42s") — Aria needs the outcome, not the full log
         """
-        import re as _re
         # Strip EXEC blocks
-        text = _re.sub(
+        text = re.sub(
             r"EXEC:file:([^\n]+)\n```[^\n]*\n(.*?)```",
             lambda m: f"\n[📄 `{m.group(1).strip()}` — {len(m.group(2).strip().splitlines())} lines · shown in apply prompt]\n",
             response,
-            flags=_re.DOTALL | _re.IGNORECASE,
+            flags=re.DOTALL | re.IGNORECASE,
         )
-        text = _re.sub(
+        text = re.sub(
             r"EXEC:bash\s*\n```[^\n]*\n.*?```",
             "\n[🔧 shell command · shown in apply prompt]\n",
             text,
-            flags=_re.DOTALL | _re.IGNORECASE,
+            flags=re.DOTALL | re.IGNORECASE,
         )
         # Condense large OUTPUT blocks — keep only the last 3 lines (summary line)
         def _trim_output(m):
@@ -591,13 +623,15 @@ class Orchestrator:
                 return f"{header}\nOUTPUT:\n{output}"
             summary = "\n".join(lines[-3:])  # last 3 lines = pytest summary
             return f"{header}\nOUTPUT (last 3 lines):\n{summary}"
-        text = _re.sub(
+        text = re.sub(
             r"((?:BASH OK|BASH FAILED[^\n]*):.*?)\nOUTPUT:\n(.*?)(?=\n(?:BASH|FILE|HEALTH|$)|\Z)",
             _trim_output,
             text,
-            flags=_re.DOTALL,
+            flags=re.DOTALL,
         )
         return text.strip()
+
+    _SYNTHESIS_PER_AGENT_CAP = 1600
 
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
@@ -605,11 +639,12 @@ class Orchestrator:
             "The team has weighed in:\n"
         ]
         personas = self.config["agent_personas"]
+        cap = self._SYNTHESIS_PER_AGENT_CAP
         for role, response in agent_responses.items():
             name = personas.get(role, {}).get("name", role.upper())
-            # Strip EXEC blocks and condense large output logs —
-            # Aria needs outcomes and narrative, not 200-line files or 50-line pytest logs
             display_response = self._trim_for_synthesis(response)
+            if len(display_response) > cap:
+                display_response = display_response[:cap] + "\n[truncated]"
             parts.append(f"[{name} — {role.upper()}]\n{display_response}\n")
 
         state_hint = ""
@@ -756,13 +791,6 @@ class Orchestrator:
         Detect when the user is correcting an agent and save the lesson
         as a skill for the relevant agent. Returns True if a correction was saved.
         """
-        _CORRECTION_RE = re.compile(
-            r"\b(?:stop|never|don'?t|do not|avoid|wrong|incorrect|"
-            r"you should(?:'ve| have)?|next time|always|instead of|"
-            r"that'?s (?:wrong|incorrect|not right)|"
-            r"should(?:'ve| have) (?:used?|done?|run|written?))\b",
-            re.IGNORECASE,
-        )
         if not _CORRECTION_RE.search(user_input):
             return False
 
@@ -1045,69 +1073,66 @@ class Orchestrator:
         Runs in a daemon background thread — never blocks the main flow.
         The updated state is used on the NEXT turn by routing and synthesis.
         """
-        import threading
-
         def _update() -> None:
-            try:
-                current_state = self._load_project_state()
-                project_dir = self.base_dir / "projects" / self.project_name
+            with self._state_lock:
+                try:
+                    current_state = self._load_project_state()
+                    project_dir = self.base_dir / "projects" / self.project_name
 
-                # Collect real files (skip .gitkeep, state.md, docs/)
-                file_list: list[str] = []
-                if project_dir.exists():
-                    file_list = [
-                        str(f.relative_to(project_dir))
-                        for f in sorted(project_dir.rglob("*"))
-                        if f.is_file()
-                        and f.name not in (".gitkeep", "state.md")
-                        and not str(f.relative_to(project_dir)).startswith("docs")
-                    ][:20]
+                    # Collect real files (skip .gitkeep, state.md, docs/)
+                    file_list: list[str] = []
+                    if project_dir.exists():
+                        file_list = [
+                            str(f.relative_to(project_dir))
+                            for f in sorted(project_dir.rglob("*"))
+                            if f.is_file()
+                            and f.name not in (".gitkeep", "state.md")
+                            and not str(f.relative_to(project_dir)).startswith("docs")
+                        ][:20]
 
-                # Compact summary of agent responses for the prompt
-                personas = self.config["agent_personas"]
-                agent_summary = "\n".join(
-                    f"[{personas.get(r, {}).get('name', r)}]: {resp[:500]}"
-                    for r, resp in agent_responses.items()
-                )
+                    # Compact summary of agent responses for the prompt
+                    personas = self.config["agent_personas"]
+                    agent_summary = "\n".join(
+                        f"[{personas.get(r, {}).get('name', r)}]: {resp[:500]}"
+                        for r, resp in agent_responses.items()
+                    )
 
-                prompt = (
-                    f"Project: {self.project_name}\n\n"
-                    f"Customer just asked: {user_input}\n\n"
-                    f"Team responses:\n{agent_summary[:2000]}\n\n"
-                    f"Files on disk: {', '.join(file_list) or 'none yet'}\n\n"
-                    + (f"Previous state.md:\n{current_state}\n\n" if current_state else "")
-                    + "Output a COMPLETE replacement state.md in this EXACT format "
-                    "(keep each section to max 5 bullets, be factual and specific):\n\n"
-                    "# Project State\n\n"
-                    "## What exists\n"
-                    "(files/components that are complete)\n\n"
-                    "## In progress\n"
-                    "(what's being built but not done yet)\n\n"
-                    "## Open decisions\n"
-                    "(key tech/design choices made — with date if known)\n\n"
-                    "## Next logical steps\n"
-                    "(2-3 concrete things that logically follow from current state)\n\n"
-                    "Use actual names/paths from context. Do NOT invent things not mentioned."
-                )
+                    prompt = (
+                        f"Project: {self.project_name}\n\n"
+                        f"Customer just asked: {user_input}\n\n"
+                        f"Team responses:\n{agent_summary[:2000]}\n\n"
+                        f"Files on disk: {', '.join(file_list) or 'none yet'}\n\n"
+                        + (f"Previous state.md:\n{current_state}\n\n" if current_state else "")
+                        + "Output a COMPLETE replacement state.md in this EXACT format "
+                        "(keep each section to max 5 bullets, be factual and specific):\n\n"
+                        "# Project State\n\n"
+                        "## What exists\n"
+                        "(files/components that are complete)\n\n"
+                        "## In progress\n"
+                        "(what's being built but not done yet)\n\n"
+                        "## Open decisions\n"
+                        "(key tech/design choices made — with date if known)\n\n"
+                        "## Next logical steps\n"
+                        "(2-3 concrete things that logically follow from current state)\n\n"
+                        "Use actual names/paths from context. Do NOT invent things not mentioned."
+                    )
 
-                updated = call_claude(
-                    prompt=prompt,
-                    system_prompt=(
-                        "You maintain a concise, factual project state document. "
-                        "Only include things that actually exist or have actually been decided. "
-                        "Be specific — use real file names, component names, tech choices."
-                    ),
-                    model="haiku",
-                )
-                if updated.strip():
-                    project_dir.mkdir(parents=True, exist_ok=True)
-                    (project_dir / "state.md").write_text(updated.strip(), encoding="utf-8")
-                    # Warm the turn cache so the next routing call sees it immediately
-                    self._turn_state = updated.strip()
-                    # Invalidate the routing prompt cache so it rebuilds with new state
-                    self._routing_prompt_key = ""
-            except Exception:
-                pass  # background task — never block the main flow
+                    updated = call_claude(
+                        prompt=prompt,
+                        system_prompt=(
+                            "You maintain a concise, factual project state document. "
+                            "Only include things that actually exist or have actually been decided. "
+                            "Be specific — use real file names, component names, tech choices."
+                        ),
+                        model="haiku",
+                    )
+                    if updated.strip():
+                        project_dir.mkdir(parents=True, exist_ok=True)
+                        (project_dir / "state.md").write_text(updated.strip(), encoding="utf-8")
+                        self._turn_state = updated.strip()
+                        self._routing_prompt_key = ""
+                except Exception:
+                    pass  # background task — never block the main flow
 
         threading.Thread(target=_update, daemon=True).start()
 
@@ -1268,12 +1293,6 @@ class Orchestrator:
 
         Currently detects: user asked for code/files but team only gave prose.
         """
-        _CODE_REQUEST_RE = re.compile(
-            r"\b(?:write|create|build|implement|generate|make)\s+"
-            r"(?:a\s+|an\s+|the\s+)?(?:function|class|file|script|code|"
-            r"module|api|endpoint|component|service)\b",
-            re.IGNORECASE,
-        )
         if not _CODE_REQUEST_RE.search(user_input):
             return None
 
@@ -1559,14 +1578,6 @@ class Orchestrator:
         # Pre-routing guard: if the task needs codebase access and nothing is loaded,
         # try to auto-reload the last used path silently — no prompt, no friction.
         # Only stop and ask the user if there is genuinely no saved path to reload.
-        _CODEBASE_INTENT_RE = re.compile(
-            r"\b(?:review|read|show|open|check|audit|inspect|analyse|analyze|"
-            r"implement|write|fix|refactor|update|modify|change|edit|"
-            r"work\s+on|look\s+at|go\s+through|epic|story|sprint|feature|"
-            r"file|files|code|codebase|class|function|method|module|"
-            r"endpoint|api|service|controller|model|schema)\b",
-            re.IGNORECASE,
-        )
         if not self.loaded_path and _CODEBASE_INTENT_RE.search(user_input):
             saved_cb = self.memory.load_loaded_path()
             if saved_cb:
@@ -1659,7 +1670,6 @@ class Orchestrator:
         _tdd_enabled, _tdd_health_cmd = self.memory.load_tdd_mode()
         _tdd_cwd = self.loaded_path if self.loaded_path else project_dir
 
-        import threading
         # Shared file cache + lock — populated lazily per phase.
         # All agents in the same phase share this so each file is read from disk once.
         phase_file_cache: dict = {}
@@ -1832,10 +1842,6 @@ class Orchestrator:
         # Synthesize if multiple agents responded; otherwise Aria speaks directly.
         # Skip synthesis when every agent returned a file-not-found error — synthesizing
         # those messages produces "sandbox restriction" hallucinations from the LLM.
-        _FILE_ERROR_RE = re.compile(
-            r"^(?:I couldn't find|No codebase is currently loaded)",
-            re.IGNORECASE,
-        )
         all_file_errors = bool(agent_responses) and all(
             _FILE_ERROR_RE.match(resp.strip())
             for resp in agent_responses.values()
