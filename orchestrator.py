@@ -2217,16 +2217,23 @@ class Orchestrator:
         memory_text = self.memory.load_project_memory() or "No project memory yet."
         history_text = self._format_history()
         project_dir = self.base_dir / "projects" / self.project_name
+        # When a codebase is /loaded, docs and file list come from that path
+        root_dir = self.loaded_path if self.loaded_path else project_dir
         file_list = []
-        if project_dir.exists():
+        if root_dir.exists():
+            IGNORE = {
+                ".git", "node_modules", "__pycache__", ".venv", "venv",
+                "dist", "build", ".next", "target", ".gradle", ".idea", ".vscode",
+            }
             file_list = [
-                str(f.relative_to(project_dir))
-                for f in sorted(project_dir.rglob("*"))
+                str(f.relative_to(root_dir))
+                for f in sorted(root_dir.rglob("*"))
                 if f.is_file() and f.name != ".gitkeep"
+                and not any(part in IGNORE for part in f.relative_to(root_dir).parts)
             ]
 
         # ── Check for an existing doc of the same type ──────────────
-        docs_dir = project_dir / "docs"
+        docs_dir = root_dir / "docs"
         existing_doc_path: Path | None = None
         existing_doc_content: str = ""
         if docs_dir.exists():
@@ -2322,9 +2329,11 @@ class Orchestrator:
             "deployment-plan": "deploy the application",
         }
         hint = _NEXT_HINTS.get(doc_type.lower(), "continue planning or start the next phase")
+        display_path = str(out_path) if self.loaded_path else f"projects/{self.project_name}/docs/{filename}"
+        verb = "updated" if existing_doc_path else "created"
         console.print(
-            f"\n[bold green]✓ Document created:[/bold green] "
-            f"[cyan]projects/{self.project_name}/docs/{filename}[/cyan]  "
+            f"\n[bold green]✓ Document {verb}:[/bold green] "
+            f"[cyan]{display_path}[/cyan]  "
             f"[dim]{len(content.splitlines())} lines · {len(content):,} chars[/dim]"
         )
         console.print(f"[dim]  Read it: show {filename}[/dim]")

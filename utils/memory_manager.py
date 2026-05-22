@@ -142,24 +142,45 @@ class MemoryManager:
             memory_file.unlink()
         self._entries_cache = None
 
-    def load_project_docs(self, max_docs: int = 3, max_chars_each: int = 3000) -> str:
+    def load_project_docs(
+        self,
+        max_docs: int = 3,
+        max_chars_each: int = 3000,
+        loaded_path: "Path | None" = None,
+    ) -> str:
         """
-        Load the most recently exported docs from projects/<name>/docs/.
+        Load the most recently exported docs from docs/ folders.
+        When a codebase is /loaded, checks both the loaded path's docs/ and
+        the internal projects/<name>/docs/ — deduplicates by filename.
         Returns a combined string injected into agent system prompts so agents
         start a new session already aware of requirements, epics, sprint plans, etc.
         Capped to avoid excessive token usage — full docs always on disk.
         """
-        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
-        if not docs_dir.exists():
+        docs_dirs = []
+        if loaded_path:
+            ld = loaded_path / "docs"
+            if ld.exists():
+                docs_dirs.append(ld)
+        internal = self.base_dir / "projects" / self.project_name / "docs"
+        if internal.exists():
+            docs_dirs.append(internal)
+        if not docs_dirs:
             return ""
 
-        doc_files = sorted(
-            docs_dir.glob("*.md"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-        if not doc_files:
+        # Collect from all dirs, dedup by filename (loaded_path takes priority)
+        seen_names: set[str] = set()
+        all_files = []
+        for dd in docs_dirs:
+            for f in sorted(dd.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True):
+                if f.name not in seen_names:
+                    seen_names.add(f.name)
+                    all_files.append(f)
+        # Re-sort all by mtime descending
+        all_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+
+        if not all_files:
             return ""
+        doc_files = all_files
 
         parts = []
         for doc_file in doc_files[:max_docs]:

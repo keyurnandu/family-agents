@@ -172,7 +172,9 @@ class Agent:
             sections.append(f"## Additional Skills & Expertise\n{skills_text}")
 
         # Inject previously exported project documents (requirements, sprint plans, etc.)
-        docs_text = self.memory.load_project_docs(max_docs=max_docs, max_chars_each=max_doc_chars)
+        docs_text = self.memory.load_project_docs(
+            max_docs=max_docs, max_chars_each=max_doc_chars, loaded_path=loaded_path
+        )
         if docs_text:
             sections.append("## Project Documents\n" + docs_text)
 
