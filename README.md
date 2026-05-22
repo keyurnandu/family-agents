@@ -127,7 +127,7 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 /model          # show what's currently active
 ```
 
-**Ctrl+C** — interrupt any running agent and return to the prompt immediately.
+**Ctrl+C** — interrupt any running agent and return to the prompt immediately. Then use `/redo` to edit and re-send your last message without retyping it.
 
 ---
 
@@ -149,6 +149,7 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
+| `/redo` | Re-send or edit your last message — pre-filled prompt, press Enter to re-send or type a correction |
 | `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` |
 | `/load <path>` | Load an existing codebase for review or editing |
 | `/unload` | Unload the current codebase |
@@ -307,6 +308,34 @@ Workflow: Casey writes tests first → Sam implements → health check runs afte
 ```
 
 The `/status` command also shows TDD mode in the project snapshot.
+
+---
+
+## Agents See Command Output
+
+When an agent runs a shell command via `EXEC:bash`, the full output is captured and fed back into their context — so they can read test results, errors, and logs and respond accordingly in the same turn.
+
+```
+Sam wants to run:  venv\Scripts\python.exe -m pytest tests/ -v
+  Allow? [y/N]: y
+
+  Running…
+
+========================= test session starts ==========================
+collected 25 items
+
+tests/test_selectors.py .....  [ 20%]
+tests/test_models.py ..........[ 60%]
+tests/test_api.py ..........   [100%]
+
+========================= 25 passed in 3.42s ===========================
+
+  ✓ Done  (exit 0)
+```
+
+Sam's next response will say "All 25 tests passed — implementation is complete" because he actually read the output, not just "the command ran".
+
+If a test fails, Sam sees the full traceback and fixes the issue immediately. **Never ask an agent to "run pytest and tell me the results"** — use `EXEC:bash` so the agent sees the output directly.
 
 ---
 

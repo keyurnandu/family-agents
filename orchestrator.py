@@ -217,6 +217,10 @@ class Orchestrator:
         self.loaded_path: Path | None = None
         self.codebase_context: dict = {}
 
+        # Last user input — used by /redo to re-submit or edit after Ctrl+C
+        self.last_user_input: str = ""
+        self._interrupted: bool = False  # set True when Ctrl+C fires mid-process
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -998,6 +1002,10 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     def process(self, user_input: str):
+        # Track last input so /redo can re-submit or edit after Ctrl+C
+        self.last_user_input = user_input
+        self._interrupted = False
+
         # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
         # _try_serve_file_directly also writes to db/messages, so return immediately.
         if self._try_serve_file_directly(user_input):
@@ -1195,7 +1203,15 @@ class Orchestrator:
                             role, response = future.result()
                             phase_responses[role] = response
             except KeyboardInterrupt:
-                console.print("\n[yellow]⚡ Interrupted — returning to prompt.[/yellow]")
+                self._interrupted = True
+                # Roll back the user message we already appended so /redo can cleanly re-submit
+                if self.messages and self.messages[-1]["role"] == "user":
+                    self.messages.pop()
+                console.print(
+                    "\n[yellow]⚡ Interrupted.[/yellow]  "
+                    "Type [bold cyan]/redo[/bold cyan] to edit & re-send your last message, "
+                    "or just type a new one."
+                )
                 console.print()
                 return
 
@@ -1232,11 +1248,24 @@ class Orchestrator:
 
             all_agent_responses.update(phase_responses)
 
-            # Build context summary for the next phase from this phase's output
+            # Build context summary for the next phase from this phase's output.
+            # Split the response from the ACTIONS TAKEN block so we can prioritise
+            # keeping the action outcomes (test results, bash output) visible — they
+            # are appended at the END and would be silently truncated at 1200 chars
+            # if the agent wrote a long response first, causing the next phase agent
+            # (e.g. Aria synthesizing TDD results) to miss "25 passed" entirely.
             phase_summary_parts = []
             for role, resp in phase_responses.items():
                 agent_name = personas.get(role, {}).get("name", role.upper())
-                phase_summary_parts.append(f"[{agent_name}]:\n{resp[:1200]}")
+                if "\n\nACTIONS TAKEN:\n" in resp:
+                    narrative, actions_block = resp.split("\n\nACTIONS TAKEN:\n", 1)
+                    # Keep up to 800 chars of narrative + full actions block (cap 1500)
+                    narrative_snippet = narrative[:800]
+                    actions_snippet = actions_block[:1500]
+                    summary = f"{narrative_snippet}\n\nACTIONS TAKEN:\n{actions_snippet}"
+                else:
+                    summary = resp[:1200]
+                phase_summary_parts.append(f"[{agent_name}]:\n{summary}")
             previous_phase_output = "\n\n".join(phase_summary_parts)
 
             # Print a phase separator when there are multiple phases and more to come

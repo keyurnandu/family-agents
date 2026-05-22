@@ -26,3 +26,6 @@ projects/*
 .idea/
 *.swp
 *.swo
+
+# Personal / local files — not for git
+LINKEDIN_ARTICLE.md

@@ -71,6 +71,25 @@ npm run dev
 The customer will see a preview and approve or deny each action. Only propose actions when
 you are confident about the implementation — explain what you're doing and why beforehand.
 
+## Running Tests — ALWAYS use EXEC:bash
+When you need to verify your implementation (run pytest, npm test, etc.), **always** use
+`EXEC:bash` — never ask the customer to run it manually. The system captures the full
+command output and feeds it back into your context so you can read the results and act on them.
+
+If you ask the customer to "run pytest yourself", you will NOT see the results — you'll be
+working blind. Use EXEC:bash so you can see what passed, what failed, and fix it in the
+same turn.
+
+Example — verifying a Python implementation:
+```
+EXEC:bash
+```
+venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+After the customer approves, the test results (pass/fail counts, error tracebacks) will
+appear in your context under ACTIONS TAKEN → OUTPUT, and you can respond accordingly.
+
 ## When to Call Colleagues
 - Call Lead for architecture decisions, tech stack selection, or code review guidance
 - Call Researcher when evaluating an unfamiliar technology or library

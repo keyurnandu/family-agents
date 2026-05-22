@@ -314,21 +314,42 @@ def prompt_and_execute(
         approved = Confirm.ask("  Allow?", default=False)
 
         if approved:
-            console.print("  [dim]Running…[/dim]")
+            console.print("  [dim]Running…[/dim]\n")
+            # Capture output so we can: (a) print it for the user, and
+            # (b) inject it back into the agent pipeline so the agent can
+            # reason about test results, errors, etc.
             result = subprocess.run(
                 action.content,
                 shell=True,
                 cwd=project_dir,
-                stdin=sys.stdin,
-                stdout=sys.stdout,
-                stderr=sys.stderr,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
+            output = (result.stdout + result.stderr).strip()
+
+            # Print the captured output so the user still sees it
+            if output:
+                console.print(output)
+                console.print()
+
             if result.returncode == 0:
-                console.print("  [green]✓ Done.[/green]")
-                outcomes.append(f"BASH OK: {action.label}")
+                console.print("  [green]✓ Done[/green]  (exit 0)\n")
+                # Cap output fed back to agents at 3000 chars to avoid token explosion
+                snippet = output[-3000:] if len(output) > 3000 else output
+                outcomes.append(
+                    f"BASH OK: {action.label}\nOUTPUT:\n{snippet}" if snippet
+                    else f"BASH OK: {action.label}"
+                )
             else:
-                console.print(f"  [red]✗ Exited {result.returncode}[/red]")
-                outcomes.append(f"BASH FAILED (exit {result.returncode}): {action.label}")
+                console.print(f"  [red]✗ Exited {result.returncode}[/red]\n")
+                snippet = output[-3000:] if len(output) > 3000 else output
+                outcomes.append(
+                    f"BASH FAILED (exit {result.returncode}): {action.label}\nOUTPUT:\n{snippet}"
+                    if snippet
+                    else f"BASH FAILED (exit {result.returncode}): {action.label}"
+                )
         else:
             console.print("  [dim]Skipped.[/dim]")
             outcomes.append(f"BASH SKIPPED: {action.label}")

@@ -266,7 +266,7 @@ class Display:
             "  Just type naturally — Aria routes to the right agents automatically\n"
             "  [cyan]@sam build the login page[/cyan]    — talk directly to one agent\n"
             "  [cyan]@jordan review the API design[/cyan]\n"
-            "  Press [bold]Ctrl+C[/bold] at any time to interrupt a running agent\n\n"
+            "  Press [bold]Ctrl+C[/bold] at any time to interrupt — then type [cyan]/redo[/cyan] to edit & re-send\n\n"
             "[bold]Pasting terminal output / multiline content[/bold]\n"
             '  Type [bold]"""[/bold] to open paste mode, paste your content, '
             'then type [bold]"""[/bold] alone to send it all as one message.\n'
@@ -282,6 +282,7 @@ class Display:
             "  [cyan]/memory[/cyan]            Show project memory\n"
             "  [cyan]/history[/cyan]           Show recent conversation\n"
             "  [cyan]/clear[/cyan]             Clear context window (keeps memory)\n"
+            "  [cyan]/redo[/cyan]              Re-send or edit the last message (useful after Ctrl+C)\n"
             "  [cyan]/skill list [role][/cyan]   List skills for a role (or all roles)\n"
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"

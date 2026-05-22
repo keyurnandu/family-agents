@@ -430,6 +430,29 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd == "/clear":
                 orchestrator.clear_context()
 
+            elif cmd == "/redo":
+                # Re-submit or edit the last interrupted/sent message
+                last = orchestrator.last_user_input
+                if not last:
+                    console.print("\n[dim]Nothing to redo — no previous message recorded.[/dim]\n")
+                else:
+                    console.print(
+                        f"\n[dim]Last message:[/dim] [bold white]{last[:120]}{'…' if len(last) > 120 else ''}[/bold white]"
+                    )
+                    try:
+                        edited = Prompt.ask(
+                            "[bold cyan]Edit or press Enter to re-send[/bold cyan]",
+                            default=last,
+                        ).strip()
+                    except (KeyboardInterrupt, EOFError):
+                        console.print("\n[dim]Cancelled.[/dim]")
+                        edited = ""
+                    if edited:
+                        console.print()
+                        orchestrator.process(edited)
+                    else:
+                        console.print("[dim]Nothing sent.[/dim]\n")
+
             elif parts[0] == "/load":
                 path_arg = parts[1].strip() if len(parts) > 1 else ""
                 if not path_arg:
