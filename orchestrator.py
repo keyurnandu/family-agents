@@ -285,6 +285,22 @@ class Orchestrator:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _extra_normalize_dirs(self, project_dir: Path) -> list[Path] | None:
+        """Build the list of extra directories to strip from EXEC:bash commands.
+
+        When a codebase is /loaded at a short path (e.g. C:\\uishift\\backend2),
+        the write_dir is that loaded path — but agents may still emit the long
+        OneDrive-based project_dir or the family-agents base_dir in commands.
+        Returns a list of those extra paths, or None when unnecessary.
+        """
+        extras: list[Path] = []
+        if self.loaded_path and self.loaded_path != project_dir:
+            extras.append(project_dir)
+        # Always include base_dir — agents may reference family-agents root
+        if self.base_dir != project_dir and (not self.loaded_path or self.base_dir != self.loaded_path):
+            extras.append(self.base_dir)
+        return extras or None
+
     def _scan_codebase(self, path: Path) -> dict:
         """Scan an external codebase — structure tree + key files."""
         KEY_FILES = [
@@ -1038,7 +1054,7 @@ class Orchestrator:
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
                 write_dir = self.loaded_path if self.loaded_path else project_dir
-                prompt_and_execute(actions, write_dir)
+                prompt_and_execute(actions, write_dir, normalize_dirs=self._extra_normalize_dirs(project_dir))
 
             self.memory.extract_and_save_memories(response, role)
 
@@ -1147,6 +1163,7 @@ class Orchestrator:
         write_dir: Path,
         tdd_health_cmd: str | None,
         tdd_cwd: Path | None,
+        normalize_dirs: list[Path] | None = None,
     ) -> list[str]:
         """
         Immediately re-invoke the agent after it learned from a failure.
@@ -1208,6 +1225,7 @@ class Orchestrator:
                 write_dir,
                 tdd_health_cmd=tdd_health_cmd,
                 tdd_cwd=tdd_cwd,
+                normalize_dirs=normalize_dirs,
             )
         elif not retry_actions:
             # Agent gave a text-only response — still useful, treat as an outcome note
@@ -1757,11 +1775,13 @@ class Orchestrator:
                 actions = parse_actions(response, name)
                 if actions:
                     write_dir = self.loaded_path if self.loaded_path else project_dir
+                    _norm_dirs = self._extra_normalize_dirs(project_dir)
                     outcomes = prompt_and_execute(
                         actions,
                         write_dir,
                         tdd_health_cmd=_tdd_health_cmd if _tdd_enabled else None,
                         tdd_cwd=_tdd_cwd,
+                        normalize_dirs=_norm_dirs,
                     )
                     if outcomes:
                         phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
@@ -1784,6 +1804,7 @@ class Orchestrator:
                                 write_dir=write_dir,
                                 tdd_health_cmd=_tdd_health_cmd if _tdd_enabled else None,
                                 tdd_cwd=_tdd_cwd,
+                                normalize_dirs=_norm_dirs,
                             )
                             if retry_outcomes:
                                 phase_responses[role] += "\n\nRETRY OUTCOMES:\n" + "\n".join(retry_outcomes)
@@ -1983,7 +2004,8 @@ class Orchestrator:
         actions = parse_actions(response, name)
         if actions:
             write_dir = self.loaded_path if self.loaded_path else project_dir
-            outcomes = prompt_and_execute(actions, write_dir)
+            _norm_dirs = self._extra_normalize_dirs(project_dir)
+            outcomes = prompt_and_execute(actions, write_dir, normalize_dirs=_norm_dirs)
             if outcomes:
                 response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
                 self._check_outcomes_for_lessons(role, outcomes)
@@ -1999,6 +2021,7 @@ class Orchestrator:
                         write_dir=write_dir,
                         tdd_health_cmd=None,
                         tdd_cwd=None,
+                        normalize_dirs=_norm_dirs,
                     )
                     if retry_outcomes:
                         response += "\n\nRETRY OUTCOMES:\n" + "\n".join(retry_outcomes)

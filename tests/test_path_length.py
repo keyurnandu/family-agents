@@ -88,3 +88,57 @@ class TestActionExecutorPathNormalization:
         assert str(project_dir) not in normalized
         assert "venv" in normalized
         assert "config" in normalized
+
+
+class TestNormalizeMultipleDirs:
+    """When a codebase is /loaded at a short path, bash commands may still
+    reference the long OneDrive project_dir or base_dir. normalize_bash_command
+    should strip ALL of them."""
+
+    def test_strips_project_dir_when_write_dir_is_loaded_path(self):
+        """Agent uses OneDrive project path even though cwd is the loaded path."""
+        from utils.action_executor import normalize_bash_command
+
+        base_dir = Path(r"C:\Users\knandu\OneDrive - Adobe\Desktop\Claude\family-agents")
+        project_dir = base_dir / "projects" / "uishift"
+        loaded_path = Path(r"C:\uishift\backend2")
+
+        # Sam references the project venv, not the loaded codebase
+        cmd = str(project_dir / "venv" / "Scripts" / "python.exe") + " -m pytest tests/ -v"
+        normalized = normalize_bash_command(cmd, loaded_path, [project_dir, base_dir])
+        assert str(project_dir) not in normalized
+        assert normalized.startswith("venv")
+
+    def test_strips_base_dir_from_bash_command(self):
+        """Agent references a file in the family-agents root."""
+        from utils.action_executor import normalize_bash_command
+
+        base_dir = Path(r"C:\Users\knandu\OneDrive - Adobe\Desktop\Claude\family-agents")
+        loaded_path = Path(r"C:\uishift\backend2")
+
+        cmd = str(base_dir / "utils" / "some_tool.py") + " --check"
+        normalized = normalize_bash_command(cmd, loaded_path, [base_dir])
+        assert str(base_dir) not in normalized
+        assert "utils" in normalized
+
+    def test_no_extra_dirs_still_works(self):
+        """Backward compat: calling without extra_dirs should still work."""
+        from utils.action_executor import normalize_bash_command
+
+        project_dir = Path(r"C:\Users\knandu\OneDrive - Adobe\Desktop\Claude\family-agents\projects\my-app")
+        cmd = str(project_dir / "venv" / "Scripts" / "python.exe") + " -m pytest"
+        normalized = normalize_bash_command(cmd, project_dir)
+        assert str(project_dir) not in normalized
+        assert normalized.startswith("venv")
+
+    def test_loaded_path_itself_is_also_stripped(self):
+        """The primary write_dir (loaded path) should also be stripped."""
+        from utils.action_executor import normalize_bash_command
+
+        base_dir = Path(r"C:\Users\knandu\OneDrive - Adobe\Desktop\Claude\family-agents")
+        loaded_path = Path(r"C:\uishift\backend2")
+
+        cmd = str(loaded_path / "node_modules" / ".bin" / "jest") + " --coverage"
+        normalized = normalize_bash_command(cmd, loaded_path, [base_dir])
+        assert str(loaded_path) not in normalized
+        assert normalized.startswith("node_modules")
