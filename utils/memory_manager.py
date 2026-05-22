@@ -21,11 +21,16 @@ class MemoryManager:
             return role_file.read_text(encoding="utf-8")
         return f"# {role.upper()}\nNo predefined role memory found."
 
-    def load_project_memory(self, limit: int = 40) -> str:
+    def load_project_memory(self, limit: int = 40, categories: set | None = None) -> str:
         """
         Return project memory for injection into agent prompts.
         Only the most recent `limit` entries are returned to control token usage.
         The full history is always preserved on disk.
+
+        categories: optional set of lowercase category names to include
+                    (e.g. {"decision", "technical", "epic-plan"}).
+                    When None, all categories are included. Pass a role-specific
+                    set so each agent only sees memory relevant to their domain.
         """
         memory_file = self.dynamic_dir / "memory.md"
         if not memory_file.exists():
@@ -35,16 +40,24 @@ class MemoryManager:
             return ""
 
         entries = self.list_memory_entries()
-        if not entries or len(entries) <= limit:
-            return content
+        if not entries:
+            return ""
 
-        # Rebuild from the most recent `limit` entries only
-        omitted = len(entries) - limit
-        recent = entries[-limit:]
-        header = (
-            f"# Project Memory: {self.project_name}\n"
-            f"[{omitted} older entries omitted to save tokens — full history in memory.md]\n"
-        )
+        # Apply category filter when specified
+        if categories:
+            entries = [e for e in entries if e["category"].lower() in categories]
+            if not entries:
+                return ""
+
+        if len(entries) <= limit and not categories:
+            return content  # fast path: no filter, no truncation
+
+        recent = entries[-limit:] if len(entries) > limit else entries
+        omitted = len(entries) - len(recent)
+
+        header = f"# Project Memory: {self.project_name}\n"
+        if omitted:
+            header += f"[{omitted} older entries omitted — full history in memory.md]\n"
         body = ""
         for e in recent:
             body += (

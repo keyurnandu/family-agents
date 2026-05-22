@@ -11,6 +11,19 @@ if TYPE_CHECKING:
 
 ALL_ROLES = ["pm", "bsa", "developer", "lead", "researcher", "qa", "devops"]
 
+# Memory categories each role actually needs — avoids injecting irrelevant entries.
+# "note" and "decision" are cross-cutting and go to everyone.
+# "requirement" is for planning roles; "technical"/"epic-plan" for builders.
+_ROLE_MEMORY_CATEGORIES: dict[str, set[str]] = {
+    "pm":         {"note", "decision", "requirement", "epic-plan"},
+    "bsa":        {"note", "decision", "requirement", "epic-plan"},
+    "developer":  {"note", "decision", "technical", "epic-plan"},
+    "lead":       {"note", "decision", "technical", "epic-plan"},
+    "researcher": {"note", "decision", "technical"},
+    "qa":         {"note", "decision", "technical", "epic-plan"},
+    "devops":     {"note", "decision", "technical"},
+}
+
 
 class Agent:
     """A specialist agent representing one team member role."""
@@ -41,7 +54,10 @@ class Agent:
     _prompt_cache: dict = {}   # class-level; keyed by (role, project, cache_key)
 
     def _prompt_cache_key(self) -> str:
-        """Lightweight cache key: memory entry count + skills mtime."""
+        """Cache key: memory entry count + skills mtime + codebase content hash.
+        Including key_files hash means the cache invalidates when file contents
+        change on disk (not just when the loaded path changes).
+        """
         import hashlib
         mem_count = len(self.memory.list_memory_entries())
         skills_dir = self.memory._skills_dir / self.role
@@ -49,7 +65,12 @@ class Agent:
             max((f.stat().st_mtime for f in skills_dir.glob("*.md")), default=0)
             if skills_dir.exists() else 0
         )
-        raw = f"{self.role}:{self.memory.project_name}:{mem_count}:{skills_mtime:.0f}"
+        # Hash key_files content so edits to loaded files invalidate the cache
+        ctx = getattr(self.orchestrator, "codebase_context", {}) if self.orchestrator else {}
+        key_files_hash = hashlib.md5(
+            str(sorted(ctx.get("key_files", {}).keys())).encode()
+        ).hexdigest()[:8]
+        raw = f"{self.role}:{self.memory.project_name}:{mem_count}:{skills_mtime:.0f}:{key_files_hash}"
         return hashlib.md5(raw.encode()).hexdigest()[:12]
 
     def _build_system_prompt(self, task: str = "") -> str:
@@ -70,7 +91,14 @@ class Agent:
         max_doc_chars = cfg.get("max_doc_chars", 1500)
 
         role_memory = self.memory.load_role_memory(self.role)
-        project_memory = self.memory.load_project_memory(limit=max_mem)
+
+        # Role-filtered memory: each agent only sees categories relevant to their domain.
+        # e.g. PM/BSA skip "technical" entries; Developer/Lead skip "requirement" noise.
+        # Falls back to all categories for any role not in the filter map.
+        role_categories = _ROLE_MEMORY_CATEGORIES.get(self.role)  # None = all
+        project_memory = self.memory.load_project_memory(
+            limit=max_mem, categories=role_categories
+        )
 
         project_section = (
             f"## Project Memory\n{project_memory}"

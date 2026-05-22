@@ -221,6 +221,19 @@ class Orchestrator:
         self.last_user_input: str = ""
         self._interrupted: bool = False  # set True when Ctrl+C fires mid-process
 
+        # ── Per-turn caches (reset at the start of every process() call) ──
+        # Load docs/memory/TDD once per turn — shared across routing,
+        # synthesis, and synthesis system prompt — instead of reloading
+        # from disk 3+ times per user message.
+        self._turn_docs: str = ""
+        self._turn_memory: str = ""
+        self._turn_tdd: tuple[bool, str] = (False, "")
+
+        # Routing prompt cache — keyed by (roster, mem_count, tdd_state).
+        # Rebuilt only when something actually changes, not on every message.
+        self._routing_prompt_cache: str = ""
+        self._routing_prompt_key: str = ""
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -363,8 +376,16 @@ class Orchestrator:
         Lightweight system prompt for Aria's routing call.
         Deliberately trimmed — routing is classification, not reasoning.
         Full context (memory, docs) is injected into specialist agents separately.
+
+        Cached: rebuilt only when roster, memory count, or TDD state changes.
         """
-        # Only pass a small slice of memory for routing context
+        # Build a cheap cache key — roster + memory count + tdd flag
+        tdd_enabled, _ = self._turn_tdd
+        cache_key = f"{sorted(self.active_roster)}:{len(self.memory.list_memory_entries())}:{tdd_enabled}"
+        if self._routing_prompt_key == cache_key and self._routing_prompt_cache:
+            return self._routing_prompt_cache
+
+        # Use turn-level pre-loaded memory (already capped to routing limit)
         routing_mem_limit = self.config.get("max_routing_memory", 8)
         project_memory = self.memory.load_project_memory(limit=routing_mem_limit)
 
@@ -381,8 +402,7 @@ class Orchestrator:
             if r not in self.active_roster
         ]
 
-        # TDD mode context — injected into routing when active
-        tdd_enabled, tdd_health_cmd = self.memory.load_tdd_mode()
+        # TDD mode context — injected into routing only when active (not on every call)
         tdd_section = ""
         if tdd_enabled:
             tdd_section = (
@@ -398,7 +418,7 @@ class Orchestrator:
                 "- For non-implementation tasks (questions, reviews, planning) use normal routing.\n\n"
             )
 
-        return (
+        prompt = (
             f"You are Aria, the project coordinator for '{self.project_name}'. "
             "Your ONLY job here is to decide which agents to involve and what to ask each one.\n\n"
             f"## Active Team\n" + "\n".join(team_lines) + "\n\n"
@@ -426,6 +446,10 @@ class Orchestrator:
             "code — only specialists can.\n\n"
             "Return ONLY valid JSON. No explanation, no markdown."
         )
+        # Store in cache
+        self._routing_prompt_cache = prompt
+        self._routing_prompt_key = cache_key
+        return prompt
 
     def _routing_doc_index(self) -> str:
         """Return a compact one-line-per-doc index for routing context."""
@@ -453,26 +477,21 @@ class Orchestrator:
     def _synthesis_system_prompt(self) -> str:
         """System prompt for Aria's synthesis/direct-answer calls.
         Includes role memory, project documents, and CRITICAL CONSTRAINT so Aria
-        never asks the customer to re-provide information that is already on disk."""
+        never asks the customer to re-provide information that is already on disk.
+
+        Uses turn-level cached docs/memory — no extra disk reads per synthesis call.
+        """
         role_memory = self.memory.load_role_memory("orchestrator")
 
-        # Inject project docs — same slice agents get — so Aria can answer
-        # document questions directly without routing to a specialist.
-        cfg = self.config
-        max_docs = cfg.get("max_project_docs", 1)
-        max_doc_chars = cfg.get("max_doc_chars", 1500)
-        docs_text = self.memory.load_project_docs(max_docs=max_docs, max_chars_each=max_doc_chars)
+        # Re-use docs and memory already loaded at the start of this turn.
+        # Avoids duplicate disk reads — agents already loaded these same slices.
         docs_section = (
-            f"\n\n## Project Documents\n{docs_text}"
-            if docs_text else ""
+            f"\n\n## Project Documents\n{self._turn_docs}"
+            if self._turn_docs else ""
         )
-
-        # Also inject a small slice of project memory for context
-        routing_mem_limit = cfg.get("max_routing_memory", 8)
-        project_memory = self.memory.load_project_memory(limit=routing_mem_limit)
         memory_section = (
-            f"\n\n## Project Memory (recent)\n{project_memory}"
-            if project_memory else ""
+            f"\n\n## Project Memory (recent)\n{self._turn_memory}"
+            if self._turn_memory else ""
         )
 
         constraint = (
@@ -504,6 +523,45 @@ class Orchestrator:
         )
         return f"{role_memory}{docs_section}{memory_section}{constraint}"
 
+    @staticmethod
+    def _trim_for_synthesis(response: str) -> str:
+        """
+        Prepare an agent response for Aria's synthesis prompt.
+        - Strip EXEC file/bash blocks (Aria doesn't need 200-line files)
+        - Condense large OUTPUT sections in ACTIONS TAKEN to a one-line summary
+          (e.g. "25 passed in 3.42s") — Aria needs the outcome, not the full log
+        """
+        import re as _re
+        # Strip EXEC blocks
+        text = _re.sub(
+            r"EXEC:file:([^\n]+)\n```[^\n]*\n(.*?)```",
+            lambda m: f"\n[📄 `{m.group(1).strip()}` — {len(m.group(2).strip().splitlines())} lines · shown in apply prompt]\n",
+            response,
+            flags=_re.DOTALL | _re.IGNORECASE,
+        )
+        text = _re.sub(
+            r"EXEC:bash\s*\n```[^\n]*\n.*?```",
+            "\n[🔧 shell command · shown in apply prompt]\n",
+            text,
+            flags=_re.DOTALL | _re.IGNORECASE,
+        )
+        # Condense large OUTPUT blocks — keep only the last 3 lines (summary line)
+        def _trim_output(m):
+            header = m.group(1)   # e.g. "BASH OK: pytest"
+            output = m.group(2).strip()
+            lines = output.splitlines()
+            if len(lines) <= 3:
+                return f"{header}\nOUTPUT:\n{output}"
+            summary = "\n".join(lines[-3:])  # last 3 lines = pytest summary
+            return f"{header}\nOUTPUT (last 3 lines):\n{summary}"
+        text = _re.sub(
+            r"((?:BASH OK|BASH FAILED[^\n]*):.*?)\nOUTPUT:\n(.*?)(?=\n(?:BASH|FILE|HEALTH|$)|\Z)",
+            _trim_output,
+            text,
+            flags=_re.DOTALL,
+        )
+        return text.strip()
+
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
             f"The customer said:\n{user_input}\n\n"
@@ -512,9 +570,9 @@ class Orchestrator:
         personas = self.config["agent_personas"]
         for role, response in agent_responses.items():
             name = personas.get(role, {}).get("name", role.upper())
-            # Strip EXEC block content — Aria doesn't need to see 200-line files;
-            # she just needs to know the agent is proposing writes.
-            display_response = self._strip_exec_for_display(response)
+            # Strip EXEC blocks and condense large output logs —
+            # Aria needs outcomes and narrative, not 200-line files or 50-line pytest logs
+            display_response = self._trim_for_synthesis(response)
             parts.append(f"[{name} — {role.upper()}]\n{display_response}\n")
 
         parts.append(
@@ -567,21 +625,64 @@ class Orchestrator:
             pass  # non-critical — never block
 
     def _check_outcomes_for_lessons(self, role: str, outcomes: list[str]) -> None:
-        """After an agent's actions, check outcomes for failures and extract lessons."""
+        """After an agent's actions, batch all failures into ONE haiku call.
+        Previously called _extract_lesson once per failure — now collects all
+        failures and makes a single call, saving N-1 LLM calls per multi-failure turn.
+        """
+        failures: list[str] = []
         for outcome in outcomes:
             if outcome.startswith("BASH FAILED"):
-                self._extract_lesson(
-                    role,
-                    f"Bash command failed:\n{outcome}",
-                    trigger="bash-failure",
-                )
+                failures.append(f"Bash command failed:\n{outcome}")
             elif outcome.startswith("HEALTH_CHECK: FAILED"):
                 snippet = outcome.replace("HEALTH_CHECK: FAILED", "").strip()
-                self._extract_lesson(
-                    role,
-                    f"Health check failed after writing files:\n{snippet}",
-                    trigger="health-check-failure",
-                )
+                failures.append(f"Health check failed after writing files:\n{snippet}")
+
+        if not failures:
+            return
+
+        if len(failures) == 1:
+            # Single failure — use existing single-lesson path
+            self._extract_lesson(role, failures[0], trigger="bash-failure")
+            return
+
+        # Multiple failures — one batched haiku call for all of them
+        persona = self.config["agent_personas"].get(role, {})
+        name = persona.get("name", role.upper())
+        failures_text = "\n\n---\n\n".join(
+            f"Failure {i+1}:\n{f}" for i, f in enumerate(failures)
+        )
+        prompt = (
+            f"You are {name}, a {role} on a software development team.\n\n"
+            f"Multiple things went wrong in this turn:\n\n{failures_text}\n\n"
+            f"Write {len(failures)} concise, actionable lessons — one per failure. "
+            "Number them 1., 2., etc. "
+            "Each lesson must start with 'Always', 'Never', or 'Before'. "
+            "Be specific — reference the exact command, tool, or pattern. "
+            "One sentence each. No preamble."
+        )
+        try:
+            response = call_claude(
+                prompt=prompt,
+                system_prompt="You extract precise, actionable lessons from failures. Be specific, not generic.",
+                model="haiku",
+            )
+            # Parse numbered lessons and save each one
+            lesson_lines = [
+                line.lstrip("0123456789. ").strip()
+                for line in response.splitlines()
+                if line.strip() and line.strip()[0].isdigit()
+            ]
+            if not lesson_lines:
+                lesson_lines = [response.strip()]
+            for lesson in lesson_lines:
+                if lesson:
+                    self.memory.save_auto_skill(role, lesson, "bash-failure-batch")
+                    console.print(
+                        f"[dim green]  📚 {persona.get('emoji','')} {name} learned: "
+                        f"{lesson[:80]}{'…' if len(lesson) > 80 else ''}[/dim green]"
+                    )
+        except Exception:
+            pass  # non-critical — never block
 
     def _detect_and_save_correction(self, user_input: str) -> bool:
         """
@@ -1011,6 +1112,18 @@ class Orchestrator:
         # Track last input so /redo can re-submit or edit after Ctrl+C
         self.last_user_input = user_input
         self._interrupted = False
+
+        # ── Populate per-turn caches (one disk read each, shared across all
+        #    routing / agent / synthesis calls in this turn) ────────────────
+        cfg = self.config
+        self._turn_tdd = self.memory.load_tdd_mode()
+        self._turn_memory = self.memory.load_project_memory(
+            limit=cfg.get("max_routing_memory", 8)
+        )
+        self._turn_docs = self.memory.load_project_docs(
+            max_docs=cfg.get("max_project_docs", 1),
+            max_chars_each=cfg.get("max_doc_chars", 1500),
+        )
 
         # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
         # _try_serve_file_directly also writes to db/messages, so return immediately.
