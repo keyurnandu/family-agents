@@ -821,6 +821,7 @@ Routing also uses a stripped-down system prompt: no full document content (just 
 ```yaml
 model: sonnet            # alias: haiku / sonnet / opus
 routing_model: haiku     # model used for Aria's routing decision — haiku is faster and sufficient
+safe_context_tokens: 200000  # token threshold for the context bar — set to your model's context window
 max_history_messages: 10 # conversation turns loaded when resuming a project
 max_memory_entries: 15   # memory entries injected into agent prompts (full history kept on disk)
 max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)

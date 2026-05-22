@@ -38,9 +38,10 @@ class Display:
             )
             console.print(response)
 
-    def show_token_usage(self, exchange_tokens: int, session_tokens: int, calls: int):
+    def show_token_usage(self, exchange_tokens: int, session_tokens: int, calls: int,
+                         safe_context: int = 200_000):
         """Show a compact per-message token summary after each exchange."""
-        pct = min(session_tokens / 80_000, 1.0)
+        pct = min(session_tokens / safe_context, 1.0)
         bar_color = "green" if pct < 0.5 else "yellow" if pct < 0.8 else "red"
         pct_str = f"{int(pct * 100)}%"
         warn = "  [yellow]⚠ context large — consider /clear[/yellow]" if pct > 0.75 else ""
@@ -124,7 +125,8 @@ class Display:
                     model: str, real_files: list, doc_files: list,
                     memory_entries: list, category_counts: dict,
                     total_skills: int, session_stats: dict,
-                    tdd_enabled: bool = False, tdd_health_cmd: str = ""):
+                    tdd_enabled: bool = False, tdd_health_cmd: str = "",
+                    safe_context: int = 200_000):
         from rich.panel import Panel
         from pathlib import Path
 
@@ -134,7 +136,7 @@ class Display:
         last_active = info.get("last_active", "—") if info else "—"
 
         # Token bar
-        token_pct = min(est_tokens / 80000, 1.0)
+        token_pct = min(est_tokens / safe_context, 1.0)
         bar_len = 20
         filled = int(bar_len * token_pct)
         bar_color = "green" if token_pct < 0.5 else "yellow" if token_pct < 0.8 else "red"

@@ -774,7 +774,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
             orchestrator.direct_message(mention.group(1).lower(), mention.group(2).strip())
             post = get_session_stats()
             exchange_tokens = post["estimated_tokens"] - (pre["input_chars"] + pre["output_chars"]) // 4
-            display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"])
+            display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"],
+                                     safe_context=config.get("safe_context_tokens", 200_000))
             continue
 
         # ── Regular message → route through Aria ─────────────────────
@@ -783,7 +784,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
         orchestrator.process(user_input)
         post = get_session_stats()
         exchange_tokens = post["estimated_tokens"] - (pre["input_chars"] + pre["output_chars"]) // 4
-        display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"])
+        display.show_token_usage(max(exchange_tokens, 0), post["estimated_tokens"], post["calls"],
+                                 safe_context=config.get("safe_context_tokens", 200_000))
 
 
 if __name__ == "__main__":

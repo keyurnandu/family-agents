@@ -1688,6 +1688,7 @@ class Orchestrator:
             session_stats=stats,
             tdd_enabled=tdd_enabled,
             tdd_health_cmd=tdd_health_cmd,
+            safe_context=self.config.get("safe_context_tokens", 200_000),
         )
 
     def _detect_export_intent(self, user_input: str) -> tuple[str, str] | None:
