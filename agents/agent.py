@@ -264,13 +264,14 @@ class Agent:
         return result
 
     def _get_peer_input(self, colleague_role: str, question: str) -> str:
-        """Ask a peer agent a single question (no further nesting)."""
+        """Ask a peer agent a single question (no further nesting).
+
+        Any instantiated agent can be consulted — including bench agents
+        (researcher, qa, devops) that aren't on the active roster.
+        This mirrors how Aria's routing can pull bench agents into phases.
+        """
         if not self.orchestrator:
             return "(peer consultation unavailable)"
-
-        active = getattr(self.orchestrator, "active_roster", [])
-        if colleague_role not in active:
-            return f"({colleague_role} is not on the active team)"
 
         peer: Agent | None = self.orchestrator.agents.get(colleague_role)
         if not peer:
