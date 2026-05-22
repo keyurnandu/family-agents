@@ -300,7 +300,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
         # the whole block as a single message. This prevents pasted
         # terminal output (e.g. pytest results) from being processed
         # line-by-line and consuming massive tokens.
-        if user_input == '"""' or user_input.startswith('"""') and len(user_input) == 3:
+        if user_input.startswith('"""'):
             console.print(
                 "[dim]Paste mode — enter your content, then type [bold]\"\"\"[/bold] on its own line to send.[/dim]"
             )
