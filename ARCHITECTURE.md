@@ -211,5 +211,5 @@ flowchart TD
 | **Single-pass file count** | `build_tree()` counts files as it walks the directory tree — no separate `rglob("*")` traversal |
 | **Hash-based memory dedup** | `save_project_memory()` compares full normalized content against parsed entries — replaces fragile `[:60]` substring check that caused false positives |
 | **Bench agent consultation** | `_get_peer_input` allows any instantiated agent to be consulted via `ASK_COLLEAGUE` — including bench agents (researcher, qa, devops) not on the active roster; only truly non-existent roles are rejected |
-| **Bash path normalization** | `normalize_bash_command()` case-insensitively strips `project_dir` absolute paths from EXEC:bash commands before `subprocess.run` — prevents WinError 206 (MAX_PATH exceeded) on long OneDrive paths; agent prompts also instruct agents to use relative paths since cwd is already set |
-| **Test suite** | 72 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
+| **Bash path normalization** | `normalize_bash_command()` case-insensitively strips absolute paths (write_dir + project_dir + base_dir, longest first) from EXEC:bash commands before `subprocess.run` — prevents WinError 206 even when a codebase is `/load`ed at a different path than the OneDrive project dir; agent prompts also instruct agents to use relative paths since cwd is already set |
+| **Test suite** | 76 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
