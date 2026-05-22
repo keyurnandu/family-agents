@@ -83,7 +83,7 @@ ROUTING_SCHEMA = {
                     "agents": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Roles to run in parallel during this phase (active team only)",
+                        "description": "Roles to run in parallel during this phase. May include bench agents (researcher, qa, devops) when their specialty is clearly needed — they will be pulled in automatically for the phase.",
                     },
                     "tasks": {
                         "type": "object",
@@ -148,6 +148,15 @@ _FULL_FILE_RE = re.compile(
 _EPIC_KICKOFF_RE = re.compile(
     r"\b(?:work\s+on|start|implement|begin|kick\s*off|tackle|do|complete|finish)\s+"
     r"(?:epic|story|e\d+|s\d+|sprint)",
+    re.IGNORECASE,
+)
+
+# Pre-filter for the clarification gate — only triggers on substantial new-build requests
+_LARGE_BUILD_RE = re.compile(
+    r"\b(?:build|create|implement|develop|design|architect|make)\s+"
+    r"(?:a\s+|an\s+|the\s+)?(?:new\s+)?(?:complete|full|entire|whole\s+)?"
+    r"(?:app(?:lication)?|system|platform|service|website|product|solution|"
+    r"backend|frontend|api|database|microservice|module|component)\b",
     re.IGNORECASE,
 )
 
@@ -229,10 +238,13 @@ class Orchestrator:
         self._turn_memory: str = ""
         self._turn_tdd: tuple[bool, str] = (False, "")
 
-        # Routing prompt cache — keyed by (roster, mem_count, tdd_state).
+        # Routing prompt cache — keyed by (roster, mem_count, tdd_state, state_mtime).
         # Rebuilt only when something actually changes, not on every message.
         self._routing_prompt_cache: str = ""
         self._routing_prompt_key: str = ""
+
+        # Per-turn project state (state.md) — loaded once, used in routing + synthesis
+        self._turn_state: str = ""
 
     # ------------------------------------------------------------------
     # Helpers
@@ -377,11 +389,16 @@ class Orchestrator:
         Deliberately trimmed — routing is classification, not reasoning.
         Full context (memory, docs) is injected into specialist agents separately.
 
-        Cached: rebuilt only when roster, memory count, or TDD state changes.
+        Cached: rebuilt only when roster, memory count, TDD state, or project state changes.
         """
-        # Build a cheap cache key — roster + memory count + tdd flag
+        # Build cache key — include state mtime so it rebuilds when state.md is updated
         tdd_enabled, _ = self._turn_tdd
-        cache_key = f"{sorted(self.active_roster)}:{len(self.memory.list_memory_entries())}:{tdd_enabled}"
+        state_file = self.base_dir / "projects" / self.project_name / "state.md"
+        state_mtime = f"{state_file.stat().st_mtime:.0f}" if state_file.exists() else "0"
+        cache_key = (
+            f"{sorted(self.active_roster)}:{len(self.memory.list_memory_entries())}"
+            f":{tdd_enabled}:{state_mtime}"
+        )
         if self._routing_prompt_key == cache_key and self._routing_prompt_cache:
             return self._routing_prompt_cache
 
@@ -397,9 +414,16 @@ class Orchestrator:
             f"{ROLE_DESCRIPTIONS.get(role, '')}"
             for role in self.active_roster
         ]
-        available = [
+
+        # Bench agents — available to pull in when clearly needed
+        bench_roles = [
             r for r in self.config["team"]["available_agents"]
             if r not in self.active_roster
+        ]
+        bench_lines = [
+            f"- {role} ({self.config['agent_personas'].get(role, {}).get('name', role)}): "
+            f"{ROLE_DESCRIPTIONS.get(role, '')}"
+            for role in bench_roles
         ]
 
         # TDD mode context — injected into routing only when active (not on every call)
@@ -418,13 +442,25 @@ class Orchestrator:
                 "- For non-implementation tasks (questions, reviews, planning) use normal routing.\n\n"
             )
 
+        # Project state — inject when available (gives Aria structured awareness)
+        state_section = ""
+        if self._turn_state:
+            state_section = f"## Project State\n{self._turn_state[:1200]}\n\n"
+
         prompt = (
             f"You are Aria, the project coordinator for '{self.project_name}'. "
             "Your ONLY job here is to decide which agents to involve and what to ask each one.\n\n"
             f"## Active Team\n" + "\n".join(team_lines) + "\n\n"
-            + (f"## Available to Add\n{', '.join(available)}\n\n" if available else "")
+            + (
+                "## Bench Agents (pull in when their specialty is clearly needed)\n"
+                + "\n".join(bench_lines) + "\n"
+                "Include a bench agent in a phase's agents list when their expertise is clearly "
+                "required. Do NOT add them for simple tasks where active team can handle it.\n\n"
+                if bench_lines else ""
+            )
             + (f"## Recent Project Memory\n{project_memory}\n\n" if project_memory else "")
             + (f"## Existing Documents\n{doc_index}\n\n" if doc_index else "")
+            + state_section
             + tdd_section
             + "## Routing Rules\n"
             "- Use sequential PHASES only when tasks genuinely depend on each other "
@@ -433,6 +469,7 @@ class Orchestrator:
             "that doesn't need hand-offs.\n"
             "- Agents within a phase run in parallel — assign each a specific task.\n"
             "- If docs already cover requirements, skip the requirements phase.\n"
+            "- If the Project State shows something is already complete, do not re-do it.\n"
             "- For greetings or simple clarifications, return an empty agents list.\n"
             "- If the customer asks about sprint details, epics, stories, requirements, or any "
             "document — route to ONE specialist only (bsa for requirements/stories/epics, "
@@ -575,16 +612,25 @@ class Orchestrator:
             display_response = self._trim_for_synthesis(response)
             parts.append(f"[{name} — {role.upper()}]\n{display_response}\n")
 
+        state_hint = ""
+        if self._turn_state:
+            state_hint = (
+                f"\n\n## Current Project State (use this for context-aware next-step suggestions)\n"
+                f"{self._turn_state[:600]}"
+            )
+
         parts.append(
             "\nAs Aria, the coordinator, synthesize these into a clear, unified response "
             "for the customer. Be concise. Credit team members where relevant. "
             "If agents have file changes queued, tell the customer they will be prompted to approve them. "
-            "If there are open questions for the customer, group them at the end.\n\n"
-            "IMPORTANT: Always close your response with a brief **What would you like to do next?** "
-            "section offering 2–3 concrete options tailored to where the project is now "
-            "(e.g. move to implementation, refine requirements, write a test plan, review the code, deploy, etc.). "
-            "Keep each option to one short line. This keeps the team moving forward without the customer "
-            "having to guess what's possible."
+            "If there are open questions for the customer, group them at the end."
+            + state_hint
+            + "\n\nIMPORTANT: Always close your response with a brief **What would you like to do next?** "
+            "section offering 2–3 concrete options that directly follow from the project state above "
+            "(e.g. if auth is complete and tests are missing → suggest writing tests; "
+            "if implementation is done → suggest deployment or review). "
+            "Keep each option to one short line. Be specific — reference actual components or files "
+            "from the project, not generic phrases like 'continue development'."
         )
         return "\n".join(parts)
 
@@ -976,6 +1022,195 @@ class Orchestrator:
         )
 
     # ------------------------------------------------------------------
+    # Project state — structured awareness of what exists and what's next
+    # ------------------------------------------------------------------
+
+    def _load_project_state(self) -> str:
+        """Read state.md if it exists. Returns empty string when not yet created."""
+        state_file = self.base_dir / "projects" / self.project_name / "state.md"
+        if not state_file.exists():
+            return ""
+        try:
+            return state_file.read_text(encoding="utf-8")
+        except Exception:
+            return ""
+
+    def _update_project_state(
+        self, user_input: str, agent_responses: dict, final_response: str
+    ) -> None:
+        """
+        After each exchange, ask Haiku to update state.md with a structured snapshot
+        of what exists, what's in progress, open decisions, and logical next steps.
+
+        Runs in a daemon background thread — never blocks the main flow.
+        The updated state is used on the NEXT turn by routing and synthesis.
+        """
+        import threading
+
+        def _update() -> None:
+            try:
+                current_state = self._load_project_state()
+                project_dir = self.base_dir / "projects" / self.project_name
+
+                # Collect real files (skip .gitkeep, state.md, docs/)
+                file_list: list[str] = []
+                if project_dir.exists():
+                    file_list = [
+                        str(f.relative_to(project_dir))
+                        for f in sorted(project_dir.rglob("*"))
+                        if f.is_file()
+                        and f.name not in (".gitkeep", "state.md")
+                        and not str(f.relative_to(project_dir)).startswith("docs")
+                    ][:20]
+
+                # Compact summary of agent responses for the prompt
+                personas = self.config["agent_personas"]
+                agent_summary = "\n".join(
+                    f"[{personas.get(r, {}).get('name', r)}]: {resp[:500]}"
+                    for r, resp in agent_responses.items()
+                )
+
+                prompt = (
+                    f"Project: {self.project_name}\n\n"
+                    f"Customer just asked: {user_input}\n\n"
+                    f"Team responses:\n{agent_summary[:2000]}\n\n"
+                    f"Files on disk: {', '.join(file_list) or 'none yet'}\n\n"
+                    + (f"Previous state.md:\n{current_state}\n\n" if current_state else "")
+                    + "Output a COMPLETE replacement state.md in this EXACT format "
+                    "(keep each section to max 5 bullets, be factual and specific):\n\n"
+                    "# Project State\n\n"
+                    "## What exists\n"
+                    "(files/components that are complete)\n\n"
+                    "## In progress\n"
+                    "(what's being built but not done yet)\n\n"
+                    "## Open decisions\n"
+                    "(key tech/design choices made — with date if known)\n\n"
+                    "## Next logical steps\n"
+                    "(2-3 concrete things that logically follow from current state)\n\n"
+                    "Use actual names/paths from context. Do NOT invent things not mentioned."
+                )
+
+                updated = call_claude(
+                    prompt=prompt,
+                    system_prompt=(
+                        "You maintain a concise, factual project state document. "
+                        "Only include things that actually exist or have actually been decided. "
+                        "Be specific — use real file names, component names, tech choices."
+                    ),
+                    model="haiku",
+                )
+                if updated.strip():
+                    project_dir.mkdir(parents=True, exist_ok=True)
+                    (project_dir / "state.md").write_text(updated.strip(), encoding="utf-8")
+                    # Warm the turn cache so the next routing call sees it immediately
+                    self._turn_state = updated.strip()
+                    # Invalidate the routing prompt cache so it rebuilds with new state
+                    self._routing_prompt_key = ""
+            except Exception:
+                pass  # background task — never block the main flow
+
+        threading.Thread(target=_update, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # Clarification gate — ask one question before routing big vague tasks
+    # ------------------------------------------------------------------
+
+    def _check_needs_clarification(self, user_input: str) -> str | None:
+        """
+        Check whether a large/vague new-build request needs one clarifying question
+        before the team starts work. Returns the question string, or None if clear.
+
+        Pre-filter conditions (all must pass to trigger the Haiku call):
+        - Message matches a large-build pattern (app, system, platform, etc.)
+        - Message is > 8 words
+        - Project has < 3 memory entries (little existing context)
+        - No requirements document exists yet
+        - This is the first or second user message (early in the conversation)
+        """
+        if len(user_input.split()) <= 8:
+            return None
+        if not _LARGE_BUILD_RE.search(user_input):
+            return None
+
+        # Skip if project already has good context
+        if len(self.memory.list_memory_entries()) >= 3:
+            return None
+
+        # Skip if a requirements doc already exists
+        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
+        if docs_dir.exists() and any(docs_dir.glob("*requirement*.md")):
+            return None
+
+        # Only fire early in the conversation
+        user_messages = [m for m in self.messages if m["role"] == "user"]
+        if len(user_messages) > 2:
+            return None
+
+        try:
+            result = call_claude_json(
+                prompt=(
+                    f"A customer wants to build something:\n{user_input}\n\n"
+                    "Decide if ONE focused clarifying question would meaningfully improve "
+                    "the team's output. Ask only when something critical is genuinely ambiguous "
+                    "(tech stack, scale, primary user type, or core feature scope). "
+                    "Do NOT ask if the request is already clear enough to start."
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "needs_clarification": {"type": "boolean"},
+                        "question": {"type": "string"},
+                    },
+                    "required": ["needs_clarification"],
+                },
+                system_prompt=(
+                    "You decide if a build request needs one clarifying question before a dev team "
+                    "starts work. Be conservative — only recommend asking when it would genuinely "
+                    "change what the team builds."
+                ),
+                model="haiku",
+            )
+            if result.get("needs_clarification") and result.get("question", "").strip():
+                return result["question"].strip()
+        except Exception:
+            pass
+        return None
+
+    # ------------------------------------------------------------------
+    # Intent verification — surface mismatches between request and output
+    # ------------------------------------------------------------------
+
+    def _verify_intent_coverage(
+        self, user_input: str, agent_responses: dict
+    ) -> str | None:
+        """
+        Heuristic check: did the agents produce what was actually requested?
+        Returns a warning string or None. No LLM call — pure pattern matching.
+
+        Currently detects: user asked for code/files but team only gave prose.
+        """
+        _CODE_REQUEST_RE = re.compile(
+            r"\b(?:write|create|build|implement|generate|make)\s+"
+            r"(?:a\s+|an\s+|the\s+)?(?:function|class|file|script|code|"
+            r"module|api|endpoint|component|service)\b",
+            re.IGNORECASE,
+        )
+        if not _CODE_REQUEST_RE.search(user_input):
+            return None
+
+        combined = "\n".join(agent_responses.values())
+        has_exec = "EXEC:file:" in combined or "EXEC:bash" in combined
+        has_code_fence = "```" in combined
+
+        if not has_exec and not has_code_fence:
+            return (
+                "⚠  The team gave advice but didn't write any code. "
+                "Try: '@sam write the code directly' — or the team may need "
+                "more requirements before implementing."
+            )
+        return None
+
+    # ------------------------------------------------------------------
     # Core routing
     # ------------------------------------------------------------------
 
@@ -991,17 +1226,18 @@ class Orchestrator:
             "any memories to save, and any team changes needed."
         )
         prompt = "\n\n".join(prompt_parts)
+        routing_model = self.config.get("routing_model", "haiku")
+        system_prompt = self._routing_system_prompt()
 
         try:
-            return call_claude_json(
+            result = call_claude_json(
                 prompt=prompt,
                 schema=ROUTING_SCHEMA,
-                system_prompt=self._routing_system_prompt(),
-                model=self.config.get("routing_model", "haiku"),
+                system_prompt=system_prompt,
+                model=routing_model,
             )
         except Exception as e:
             console.print(f"[dim yellow]Routing fallback (JSON parse error): {e}[/dim yellow]")
-            # Route to the full active team in a single phase so nothing is silently dropped
             return {
                 "phases": [
                     {
@@ -1011,6 +1247,34 @@ class Orchestrator:
                     }
                 ]
             }
+
+        # ── Confidence escalation ────────────────────────────────────────
+        # If Haiku produced a thin plan for a complex message, re-run with Sonnet.
+        # Thin = single agent with a very short/vague task on a long user message.
+        # This fires rarely (only when the routing looks suspicious) so the extra
+        # call happens maybe once in 20 messages on a typical session.
+        if routing_model == "haiku" and len(user_input.split()) > 12:
+            phases = result.get("phases", [])
+            total_agents = sum(len(p.get("agents", [])) for p in phases)
+            total_task_chars = sum(
+                len(t) for p in phases for t in p.get("tasks", {}).values()
+            )
+            is_thin = phases and total_agents <= 1 and total_task_chars < 60
+            if is_thin:
+                try:
+                    result = call_claude_json(
+                        prompt=prompt,
+                        schema=ROUTING_SCHEMA,
+                        system_prompt=system_prompt,
+                        model="sonnet",
+                    )
+                    console.print(
+                        "[dim]↑ Routing escalated to Sonnet (complex task detected)[/dim]"
+                    )
+                except Exception:
+                    pass  # fall back to the haiku result
+
+        return result
 
     # ------------------------------------------------------------------
     # Direct file-serve shortcut (zero LLM calls for simple read requests)
@@ -1145,6 +1409,8 @@ class Orchestrator:
             max_docs=cfg.get("max_project_docs", 1),
             max_chars_each=cfg.get("max_doc_chars", 1500),
         )
+        # Project state — load once, used by routing + synthesis
+        self._turn_state = self._load_project_state()
 
         # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
         # _try_serve_file_directly also writes to db/messages, so return immediately.
@@ -1240,6 +1506,30 @@ class Orchestrator:
             # If no saved path exists this is a normal project with no external codebase
             # (e.g. a brand-new project being built from scratch). Fall through to routing.
 
+        # ── Clarification gate ───────────────────────────────────────────
+        # For large/vague new-build requests with little project context,
+        # Aria asks ONE focused question before routing. This prevents wasting
+        # a whole phase on the wrong interpretation of an ambiguous requirement.
+        # The gate is conservative — it only fires for the first 1-2 messages
+        # of a new project that looks underspecified.
+        if self.project_name != "_general":
+            clarifying_q = self._check_needs_clarification(user_input)
+            if clarifying_q:
+                console.print()
+                console.rule(
+                    "[bold bright_cyan]🎯 Aria (Coordinator)[/bold bright_cyan]",
+                    style="bright_cyan",
+                )
+                console.print(
+                    f"Before the team dives in — {clarifying_q}\n"
+                    "[dim](Answer this, then I'll route to the team.)[/dim]"
+                )
+                console.print()
+                # Save the user's original message — they'll continue from here
+                self.db.save_message(self.project_name, "assistant", f"[Aria asked]: {clarifying_q}")
+                self.messages.append({"role": "assistant", "content": f"[Aria asked]: {clarifying_q}"})
+                return
+
         console.print()
         with console.status("[bright_cyan]🎯 Aria is routing…[/bright_cyan]", spinner="dots"):
             routing = self._get_routing(user_input)
@@ -1312,9 +1602,19 @@ class Orchestrator:
         for phase_idx, phase in enumerate(phases):
             phase_file_cache.clear()   # fresh cache per phase — don't share stale reads
             phase_name = phase.get("name", f"Phase {phase_idx + 1}")
-            agents_to_call = [r for r in phase.get("agents", []) if r in self.active_roster]
+            # Allow bench agents pulled in by Aria — not just active_roster
+            agents_in_phase = phase.get("agents", [])
+            agents_to_call = [r for r in agents_in_phase if r in self.agents]
             if not agents_to_call:
                 continue
+            # Announce any bench agents being temporarily pulled in
+            bench_pulled = [r for r in agents_to_call if r not in self.active_roster]
+            for br in bench_pulled:
+                bp = personas.get(br, {})
+                console.print(
+                    f"[dim cyan]  ↓ {bp.get('emoji','')} {bp.get('name', br)} pulled in from bench "
+                    f"for {phase_name}[/dim cyan]"
+                )
 
             # Build context for this phase: customer message + anything from prior phases
             phase_context = f"Customer said: {user_input}"
@@ -1474,6 +1774,12 @@ class Orchestrator:
         if final_response.strip():
             self.display.show_orchestrator_response(final_response)
 
+        # ── Intent verification — surface mismatch between request and output ──
+        if agent_responses:
+            mismatch_warn = self._verify_intent_coverage(user_input, agent_responses)
+            if mismatch_warn:
+                console.print(f"\n[yellow]{mismatch_warn}[/yellow]")
+
         # Persist to DB and in-memory log
         combined = final_response or "\n\n".join(
             f"[{r}]: {resp}" for r, resp in agent_responses.items()
@@ -1483,6 +1789,13 @@ class Orchestrator:
             self.messages.append({"role": "assistant", "content": combined})
         else:
             console.print("[dim yellow]No response generated. Try rephrasing your message.[/dim yellow]")
+
+        # ── Update project state in background ──────────────────────────
+        # Builds/refreshes state.md after every exchange so Aria has a
+        # structured snapshot on the next turn. Runs in a daemon thread —
+        # never adds latency to the current turn.
+        if agent_responses and self.project_name != "_general":
+            self._update_project_state(user_input, agent_responses, final_response)
 
         console.print()
 
@@ -1710,6 +2023,7 @@ class Orchestrator:
             tdd_enabled=tdd_enabled,
             tdd_health_cmd=tdd_health_cmd,
             safe_context=self.config.get("safe_context_tokens", 200_000),
+            project_state=self._load_project_state(),
         )
 
     def _detect_export_intent(self, user_input: str) -> tuple[str, str] | None:

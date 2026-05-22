@@ -494,6 +494,20 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd == "/status":
                 orchestrator.show_status()
 
+            elif cmd == "/state":
+                state = orchestrator._load_project_state()
+                if state.strip():
+                    from rich.syntax import Syntax
+                    console.print()
+                    console.rule("[bold bright_cyan]📍 Project State[/bold bright_cyan]", style="bright_cyan")
+                    console.print(Syntax(state, "markdown", theme="monokai"))
+                    console.print()
+                else:
+                    console.print(
+                        "\n[dim]No state.md yet — state is built automatically after the "
+                        "first exchange.[/dim]\n"
+                    )
+
             elif parts[0] == "/export":
                 doc_type = parts[1].strip() if len(parts) > 1 else ""
                 if not doc_type:

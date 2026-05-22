@@ -796,18 +796,29 @@ Several optimizations run automatically to keep token usage low:
 
 | Optimization | What it does |
 |---|---|
-| **Per-turn cache** | Docs, memory, and TDD config loaded once per message — shared across all routing, agent, and synthesis calls instead of reloading from disk 3× per turn |
-| **Routing prompt cache** | Aria's routing prompt rebuilt only when the team roster, memory, or TDD state actually changes — not on every message |
+| **Per-turn cache** | Docs, memory, TDD config, and project state loaded once per message — shared across all routing, agent, and synthesis calls |
+| **Routing prompt cache** | Aria's routing prompt rebuilt only when the team roster, memory, TDD state, or project state actually changes — not on every message |
 | **Role-filtered memory** | Each agent only receives memory categories relevant to their domain (PM/BSA skip technical entries; Developer/Lead skip requirement noise) |
 | **Synthesis output trimming** | Large pytest/bash output blocks condensed to a 3-line summary before Aria's synthesis call — saves 500–2000 tokens on code-heavy turns |
 | **Batched lesson extraction** | Multiple failures in one turn produce a single haiku call for all lessons instead of one call per failure |
 | **Codebase content hash** | Agent system prompt cache invalidates correctly when files change on disk, not just when the path changes |
 
+### How Aria routes smarter
+
+Six intelligence layers run automatically every turn:
+
+| Feature | How it works |
+|---|---|
+| **Project state document** | After every exchange Aria updates `state.md` in the background — what's built, decisions made, what's next. Injected into routing so Aria never re-derives context from scratch |
+| **Clarification gate** | For large/vague new-build requests with little existing context, Aria asks one focused question before routing — prevents a wasted phase on the wrong interpretation |
+| **Dynamic bench agents** | Aria can pull in `researcher`, `qa`, or `devops` for a phase even if they're not on the active team — no `/add` needed when the task clearly requires their specialty |
+| **Confidence escalation** | If Haiku produces a thin plan for a complex message (single agent, vague task), routing automatically re-runs with Sonnet |
+| **Intent verification** | After agents respond, a heuristic check detects if the user asked for code but only got prose — surfaces a clear warning |
+| **State-aware next steps** | Aria's synthesis reads `state.md` to suggest concrete next actions (e.g. "auth is done → write tests") instead of generic options |
+
 ### Routing speed
 
 Aria's routing decision runs on `routing_model` (default: `haiku`) — a separate, faster model from the one agents use. This makes the "Aria is routing…" step noticeably quicker without sacrificing response quality.
-
-Two config knobs control routing overhead:
 
 | Setting | Default | Effect |
 |---|---|---|
@@ -815,6 +826,35 @@ Two config knobs control routing overhead:
 | `max_routing_memory` | `8` | Memory entries sent to routing — lower = smaller prompt = faster |
 
 Routing also uses a stripped-down system prompt: no full document content (just titles), no role definitions, no codebase tree — only what Aria needs to decide *who* to ask.
+
+#### New `/state` command
+
+```
+/state
+```
+
+Shows the current `state.md` — a live structured snapshot of the project:
+
+```
+# Project State
+
+## What exists
+- auth/login.py (complete)
+- api/routes.py (complete)
+
+## In progress
+- Payment integration (started, not complete)
+
+## Open decisions
+- DB: chose PostgreSQL (2026-05-10)
+
+## Next logical steps
+- Add integration tests for the auth flow
+- Wire up payment webhooks
+- Deploy to staging
+```
+
+Updated automatically after every exchange. Also visible in `/status`.
 
 ---
 

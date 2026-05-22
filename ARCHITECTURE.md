@@ -8,6 +8,7 @@ High-level technical flow covering every major subsystem: CLI → Orchestrator �
 flowchart TD
     USER((👤 User)) -->|types in terminal| CLI_IN
 
+
     %% ─────────────────────────────────────────────
     subgraph CLI["🖥️  cli.py  —  Entry Point"]
         CLI_IN[Input Parser]
@@ -110,6 +111,21 @@ flowchart TD
     end
 
     %% ─────────────────────────────────────────────
+    subgraph ARIA_INTEL["🧠  Aria Intelligence Layer"]
+        CG[Clarification gate\npre-filter: large build + vague + early?\n→ 1 Haiku call → ask one question\nbefore routing if needed]
+
+        CE[Confidence escalation\nHaiku routing thin for complex msg?\n→ re-run with Sonnet automatically]
+
+        BA[Bench agent inclusion\nAria can pull in researcher·qa·devops\nfor any phase without /add command]
+
+        IV[Intent verification\nheuristic: asked for code → got prose?\n→ surface warning to user]
+
+        PS_UPDATE[_update_project_state\nbackground daemon thread\nHaiku writes state.md after every turn\n— what exists · in progress · decisions · next steps]
+
+        PS_READ[_load_project_state\nread state.md → _turn_state\ninjected into routing prompt + synthesis\nso next turn Aria reasons from facts not inference]
+    end
+
+    %% ─────────────────────────────────────────────
     subgraph MEM["🗄️  Memory Layer"]
         DB[(SQLite\ndb_manager.py\nprojects · messages\ntimestamps)]
 
@@ -118,6 +134,8 @@ flowchart TD
         MD_SKILLS[(memory/skills/role/\nauto-learned.md\ncustom skill files .md)]
 
         MD_ROLES[(memory/roles/role.md\nrole identity · responsibilities\nbehaviours · output format)]
+
+        STATE_FILE[(projects/name/state.md\nstructured project snapshot\nupdated every turn in background)]
     end
 
     %% ─────────────────────────────────────────────
@@ -127,15 +145,28 @@ flowchart TD
     LCHK --> APPLY
     TC --> MD_MEM
     TC --> MD_SKILLS
+    TC --> PS_READ
     BUILD_SP --> MD_MEM
     BUILD_SP --> MD_SKILLS
     BUILD_SP --> MD_ROLES
     PROCESS --> DB
+    PROCESS --> CG
+    CG -->|needs clarification| USER
+    CG -->|clear enough| ROUTE
+    ROUTE --> CE
+    CE --> PHASE
+    PAR --> BA
+    BA -->|bench pulled in| AGENT_SYS
+    SYNTH --> IV
+    IV -->|mismatch| USER
     DISP --> USER
     REDO --> PROCESS
     PASTE --> PROCESS
     EXPORT --> PROCESS
     RETRO_CMD -.->|triggers| PROCESS
+    SYNTH --> PS_UPDATE
+    PS_UPDATE --> STATE_FILE
+    PS_READ --> STATE_FILE
 
     %% ─────────────────────────────────────────────
     %% Styling
@@ -159,10 +190,15 @@ flowchart TD
 | **No SDK / API key** | All LLM calls go through `claude --print` subprocess; prompt via stdin (bypasses 32k Windows cmd limit) |
 | **Parallel execution** | Agents within a phase run in `ThreadPoolExecutor`; phases are sequential so dev always has requirements first |
 | **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash` — rebuilds only when something actually changes |
-| **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd` loaded once at the start of `process()` — not re-loaded for every agent call |
+| **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd`, `_turn_state` loaded once at the start of `process()` — not re-loaded for every agent call |
 | **Role-filtered memory** | PM/BSA see requirements+decisions; Dev/Lead see technical+decisions — no agent reads irrelevant categories |
 | **Bash output capture** | `capture_output=True` → printed to terminal AND injected into outcomes so agents can reason about test results |
 | **Lesson immediacy** | `_apply_lesson` does three things atomically: persist to disk, evict prompt cache, inject into `self.messages` — active in the next response |
 | **Safe context** | Token bar shows `session_tokens / safe_context_tokens` (configurable in `settings.yaml`, default 200k) |
 | **TDD mode** | Health check runs automatically after every approved file write; failure feeds directly into lesson extraction |
 | **Phase summaries** | Split at `ACTIONS TAKEN:` boundary — narrative capped at 800 chars, actions block at 1500 chars — prevents long agent responses from burying action data |
+| **Project state** | `state.md` updated by Haiku in a background thread after every turn — Aria reads it at turn-start so routing and synthesis reason from a structured snapshot, not raw conversation inference |
+| **Clarification gate** | Pre-filter (large-build regex + word count + low context) then one Haiku JSON call — asks one question before wasting a phase on the wrong interpretation |
+| **Bench agents** | Routing schema allows any agent; phase executor announces and pulls in bench roles without requiring `/add` — then they return to bench after the phase |
+| **Confidence escalation** | If Haiku routing produces a thin plan (≤1 agent, <60 char task) on a long message, automatically re-runs with Sonnet |
+| **Intent verification** | Heuristic check — user asked for code but agents produced only prose → surface a clear warning with suggested action |

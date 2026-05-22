@@ -126,7 +126,8 @@ class Display:
                     memory_entries: list, category_counts: dict,
                     total_skills: int, session_stats: dict,
                     tdd_enabled: bool = False, tdd_health_cmd: str = "",
-                    safe_context: int = 200_000):
+                    safe_context: int = 200_000,
+                    project_state: str = ""):
         from rich.panel import Panel
         from pathlib import Path
 
@@ -178,6 +179,15 @@ class Display:
         ]
         if token_pct > 0.75:
             lines.append("\n  [yellow]⚠ Context getting large — consider /clear[/yellow]")
+
+        # Project state snapshot
+        if project_state.strip():
+            # Show just the first 10 lines of state.md in the panel
+            state_lines = [l for l in project_state.splitlines() if l.strip()][:10]
+            lines.append("")
+            lines.append("[bold]Project State[/bold]  [dim](state.md)[/dim]")
+            for sl in state_lines:
+                lines.append(f"  [dim]{sl}[/dim]")
 
         console.print()
         console.print(Panel(
@@ -299,7 +309,8 @@ class Display:
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
             "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"
-            "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs\n"
+            "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs, state\n"
+            "  [cyan]/state[/cyan]             Show the live project state (what exists, in progress, next steps)\n"
             "  [cyan]/project[/cyan]           Show current project info\n"
             "  [cyan]/switch [name][/cyan]     Switch to another project (shows picker if no name)\n"
             "  [cyan]/new <name>[/cyan]        Create and switch to a brand new project\n"
