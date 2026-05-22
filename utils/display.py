@@ -284,6 +284,8 @@ class Display:
             "  [cyan]/history[/cyan]           Show recent conversation\n"
             "  [cyan]/clear[/cyan]             Clear context window (keeps memory)\n"
             "  [cyan]/redo[/cyan]              Re-send or edit the last message (useful after Ctrl+C)\n"
+            "  [cyan]/paste[/cyan]             Open paste mode for multi-line input\n"
+            "  [cyan]/end[/cyan]               Close paste mode and send as one message\n"
             "  [cyan]/skill list [role][/cyan]   List skills for a role (or all roles)\n"
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"

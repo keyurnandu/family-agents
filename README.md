@@ -129,6 +129,21 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 
 **Ctrl+C** — interrupt any running agent and return to the prompt immediately. Then use `/redo` to edit and re-send your last message without retyping it.
 
+**Paste mode** — paste multi-line content (pytest output, error logs, long prompts) as a single message instead of line-by-line:
+
+```
+You: /paste
+Paste mode opened — paste your content below, then type /end to send.
+  ···: FAILED tests/test_api.py::test_login - AssertionError
+  ···: FAILED tests/test_api.py::test_logout - ImportError
+  ···: 2 failed, 23 passed in 4.1s
+  ···: /end
+
+  Submitting 3 lines as one message…
+```
+
+`"""` also works as an opener/closer if your terminal handles it. Use `/paste` + `/end` for reliability.
+
 ---
 
 ## In-Session Commands
@@ -150,6 +165,8 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
 | `/redo` | Re-send or edit your last message — pre-filled prompt, press Enter to re-send or type a correction |
+| `/paste` | Open paste mode — type or paste multi-line content, then `/end` to send as one message |
+| `/end` | Close paste mode and send everything as a single message |
 | `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` |
 | `/load <path>` | Load an existing codebase for review or editing |
 | `/unload` | Unload the current codebase |
@@ -768,6 +785,19 @@ These bypass the LLM pipeline entirely:
 | `show the team` / `show memory` / `project status` | 0 LLM calls — natural-language shortcuts |
 | `teach sam React Native` | 0 routing + synthesis — handled then exits |
 | `/export <type>` | 1 LLM call (the doc writer), no routing or synthesis |
+
+### Built-in token optimizations
+
+Several optimizations run automatically to keep token usage low:
+
+| Optimization | What it does |
+|---|---|
+| **Per-turn cache** | Docs, memory, and TDD config loaded once per message — shared across all routing, agent, and synthesis calls instead of reloading from disk 3× per turn |
+| **Routing prompt cache** | Aria's routing prompt rebuilt only when the team roster, memory, or TDD state actually changes — not on every message |
+| **Role-filtered memory** | Each agent only receives memory categories relevant to their domain (PM/BSA skip technical entries; Developer/Lead skip requirement noise) |
+| **Synthesis output trimming** | Large pytest/bash output blocks condensed to a 3-line summary before Aria's synthesis call — saves 500–2000 tokens on code-heavy turns |
+| **Batched lesson extraction** | Multiple failures in one turn produce a single haiku call for all lessons instead of one call per failure |
+| **Codebase content hash** | Agent system prompt cache invalidates correctly when files change on disk, not just when the path changes |
 
 ### Routing speed
 
