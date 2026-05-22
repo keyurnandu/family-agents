@@ -287,7 +287,8 @@ def main(project: str | None, list_projects: bool, model: str | None):
     # ── Main REPL loop ────────────────────────────────────────────────
     while True:
         try:
-            user_input = Prompt.ask("[bold white]You[/bold white]").strip()
+            active_model = orchestrator.model if orchestrator else (model or config.get("model", "sonnet"))
+            user_input = Prompt.ask(f"[bold white]You[/bold white] [dim]({active_model})[/dim]").strip()
         except (KeyboardInterrupt, EOFError):
             console.print("\n[dim]Session saved. Goodbye![/dim]")
             break
