@@ -295,14 +295,17 @@ def main(project: str | None, list_projects: bool, model: str | None):
             continue
 
         # ── Multiline paste mode ──────────────────────────────────────
-        # Type """ alone to open paste mode. Paste or type your content
-        # in the ··· prompts. Type """ alone on its own line to send it
-        # all as one message. Prevents pasted terminal output (e.g. pytest
-        # results) from being processed line-by-line and consuming tokens.
-        if user_input.startswith('"""'):
+        # Triggers: /paste  OR  """
+        # Type either trigger to open paste mode. Paste or type content
+        # in the ··· prompts. Type /end or """ alone to send everything
+        # as one message. Prevents pasted terminal output being processed
+        # line-by-line and consuming tokens.
+        _PASTE_OPEN  = user_input.strip() in ('/paste', '"""') or user_input.startswith('"""')
+        _PASTE_CLOSE = lambda l: l.strip() in ('/end', '"""')  # noqa: E731
+        if _PASTE_OPEN:
             console.print(
                 "[dim]Paste mode opened — paste your content below, "
-                "then type [bold]\"\"\"[/bold] on its own line to send.[/dim]"
+                "then type [bold]/end[/bold] (or [bold]\"\"\"[/bold]) to send.[/dim]"
             )
             lines = []
             while True:
@@ -312,7 +315,7 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     console.print("\n[dim]Paste cancelled.[/dim]")
                     lines = []
                     break
-                if line.strip() == '"""':
+                if _PASTE_CLOSE(line):
                     break
                 lines.append(line)
             if not lines:
