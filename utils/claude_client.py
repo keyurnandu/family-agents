@@ -3,9 +3,11 @@ Thin wrapper around `claude --print` so the rest of the system
 never imports the anthropic SDK and needs no API key.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Optional
 
 # In-process session stats (reset on process start, not persisted)
@@ -45,31 +47,48 @@ def call_claude(
     system_prompt: Optional[str] = None,
     model: Optional[str] = None,
 ) -> str:
-    """Call `claude --print` and return the response text."""
+    """Call `claude --print` and return the response text.
+
+    Both the system prompt and the user prompt are kept OFF the command line
+    to avoid Windows' 32,767-char CreateProcess limit (WinError 206).
+    - System prompt → temp file, passed via --system-prompt-file
+    - User prompt → stdin
+    """
     _check_cli()
 
     cmd = ["claude", "--print"]
 
     if model:
         cmd += ["--model", model]
-    if system_prompt:
-        cmd += ["--system-prompt", system_prompt]
 
-    # Pass the prompt via stdin, NOT as a command-line argument.
-    # Windows CreateProcess has a hard 32,767-char command-line limit — any
-    # prompt containing file contents will exceed it and silently fail.
-    # Stdin has no length limit and is the correct way to pipe large prompts.
     _session_stats["input_chars"] += len(prompt) + len(system_prompt or "")
 
-    result = subprocess.run(
-        cmd,
-        input=prompt,               # prompt → stdin (no size limit)
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+    # Write system prompt to a temp file — avoids putting thousands of
+    # chars on the command line which triggers WinError 206 on Windows
+    # when the OneDrive path + system prompt exceed 32k chars.
+    sp_file = None
+    try:
+        if system_prompt:
+            fd, sp_file = tempfile.mkstemp(suffix=".txt", prefix="claude_sp_")
+            os.write(fd, system_prompt.encode("utf-8"))
+            os.close(fd)
+            cmd += ["--system-prompt-file", sp_file]
+
+        result = subprocess.run(
+            cmd,
+            input=prompt,               # prompt → stdin (no size limit)
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    finally:
+        if sp_file:
+            try:
+                os.unlink(sp_file)
+            except OSError:
+                pass
 
     if result.returncode != 0:
         stderr = result.stderr.strip()
