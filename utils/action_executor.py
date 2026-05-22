@@ -36,6 +36,27 @@ from rich.text import Text
 console = Console()
 
 
+def normalize_bash_command(cmd: str, project_dir: Path) -> str:
+    """Replace absolute project_dir paths in a bash command with relative paths.
+
+    Agents sometimes emit full absolute paths (e.g. the OneDrive path) in
+    EXEC:bash commands. On Windows this can exceed MAX_PATH (260 chars) and
+    trigger WinError 206. Since subprocess already runs with cwd=project_dir,
+    relative paths work correctly and avoid the length issue.
+    """
+    # Use the string form as-is (not .resolve() which can change case on Windows)
+    abs_str = str(project_dir)
+    # Try both forward-slash and backslash variants, case-insensitive
+    for variant in (abs_str, abs_str.replace("\\", "/")):
+        # Strip the path + trailing separator — case-insensitive on Windows
+        for sep in (variant + "\\", variant + "/", variant):
+            idx = cmd.lower().find(sep.lower())
+            while idx != -1:
+                cmd = cmd[:idx] + cmd[idx + len(sep):]
+                idx = cmd.lower().find(sep.lower())
+    return cmd
+
+
 @dataclass
 class Action:
     kind: Literal["file", "bash"]
@@ -315,11 +336,14 @@ def prompt_and_execute(
 
         if approved:
             console.print("  [dim]Running…[/dim]\n")
+            # Normalize absolute paths to relative — prevents WinError 206
+            # on long OneDrive paths where cmd.exe exceeds MAX_PATH.
+            safe_cmd = normalize_bash_command(action.content, project_dir)
             # Capture output so we can: (a) print it for the user, and
             # (b) inject it back into the agent pipeline so the agent can
             # reason about test results, errors, etc.
             result = subprocess.run(
-                action.content,
+                safe_cmd,
                 shell=True,
                 cwd=project_dir,
                 capture_output=True,

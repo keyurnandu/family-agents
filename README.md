@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-65 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation) without requiring an LLM connection.
+72 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization) without requiring an LLM connection.
 
 ---
 
@@ -704,7 +704,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 65 tests — all TDD, run with `pytest`
+├── tests/                    # 72 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -717,7 +717,9 @@ family-agents/
 │   ├── test_memory_dedup.py  # Hash-based dedup, no false positives
 │   ├── test_build_tree.py    # Single-pass file counting
 │   ├── test_state_lock.py    # Threading lock on state updates
-│   └── test_role_trim.py     # Shared EXEC instructions, role file limits
+│   ├── test_role_trim.py     # Shared EXEC instructions, role file limits
+│   ├── test_peer_consult.py  # Bench agent consultation via ASK_COLLEAGUE
+│   └── test_path_length.py   # Windows path normalization (WinError 206)
 ├── config/
 │   └── settings.yaml         # Model, team roster, agent personas
 ├── pytest.ini                # Test configuration
@@ -835,6 +837,8 @@ Several optimizations run automatically to keep token usage low:
 | **Single-pass file count** | `build_tree` counts files during its directory walk instead of a separate `rglob("*")` traversal |
 | **Thread-safe state updates** | Background `_update_project_state` protected by a threading lock — prevents concurrent writes from stomping on each other |
 | **Hash-based memory dedup** | Memory dedup compares full normalized content against parsed entries instead of a fragile 60-char substring check — no false positives on entries sharing a common prefix |
+| **Bench agent consultation** | Any instantiated agent (including bench agents not on the active roster) can be consulted via `ASK_COLLEAGUE` — only truly non-existent roles are rejected |
+| **Bash path normalization** | `normalize_bash_command()` case-insensitively strips absolute project paths from EXEC:bash commands before execution — prevents WinError 206 on long Windows/OneDrive paths |
 
 ### How Aria routes smarter
 

@@ -217,6 +217,12 @@ class Agent:
                     "To suggest file changes, output EXEC:file: blocks with paths relative to the codebase root.",
                     "The user will be shown a compact summary and asked once whether to apply all changes.",
                     "Do NOT worry about working directory restrictions — file writes are handled by the Python harness.",
+                    "",
+                    "### EXEC:bash — working directory is already set",
+                    f"The working directory is already set to: {loaded_path}",
+                    "NEVER use absolute paths in EXEC:bash commands — always use relative paths.",
+                    "Example: `venv\\Scripts\\python.exe -m pytest` NOT the full absolute path.",
+                    "Using absolute paths on Windows causes WinError 206 (path too long).",
                 ]
                 sections.append("\n".join(codebase_lines))
 

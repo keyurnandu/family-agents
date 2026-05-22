@@ -1,4 +1,4 @@
-# Family Agents — Architecture Flow Diagram
+# family-agents — Architecture Flow Diagram
 
 High-level technical flow covering every major subsystem: CLI → Orchestrator → Agents → Action Executor → Learning Loop → Memory.
 
@@ -81,7 +81,7 @@ flowchart TD
 
         AE_PARSE --> FILE_PATH[EXEC:file:path\nShow diff stats table\nNEW +added  EDIT +added -removed\nd=show full diff  y=apply  N=skip\nOne collective prompt for batch]
 
-        AE_PARSE --> BASH_PATH[EXEC:bash\nIndividual confirm prompt\nsubprocess capture_output=True\nprint to terminal AND inject to outcomes\ncapped at 3000 chars]
+        AE_PARSE --> BASH_PATH[EXEC:bash\nIndividual confirm prompt\nnormalize_bash_command strips abs paths\nsubprocess capture_output=True\nprint to terminal AND inject to outcomes\ncapped at 3000 chars]
 
         FILE_PATH -->|approved| FILE_WRITE[Write files to disk\nproject_dir / path]
 
@@ -210,4 +210,6 @@ flowchart TD
 | **Shared EXEC instructions** | The "Executing Actions" prompt block defined once as `_EXEC_INSTRUCTIONS` in `agent.py` — injected only for implementation roles (`developer`, `lead`, `qa`, `devops`); non-impl roles never see it |
 | **Single-pass file count** | `build_tree()` counts files as it walks the directory tree — no separate `rglob("*")` traversal |
 | **Hash-based memory dedup** | `save_project_memory()` compares full normalized content against parsed entries — replaces fragile `[:60]` substring check that caused false positives |
-| **Test suite** | 65 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
+| **Bench agent consultation** | `_get_peer_input` allows any instantiated agent to be consulted via `ASK_COLLEAGUE` — including bench agents (researcher, qa, devops) not on the active roster; only truly non-existent roles are rejected |
+| **Bash path normalization** | `normalize_bash_command()` case-insensitively strips `project_dir` absolute paths from EXEC:bash commands before `subprocess.run` — prevents WinError 206 (MAX_PATH exceeded) on long OneDrive paths; agent prompts also instruct agents to use relative paths since cwd is already set |
+| **Test suite** | 72 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
