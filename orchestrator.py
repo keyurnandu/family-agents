@@ -592,11 +592,41 @@ class Orchestrator:
     # Feedback loop — auto-learning from failures, corrections, retrospectives
     # ------------------------------------------------------------------
 
+    def _apply_lesson(self, role: str, lesson: str) -> None:
+        """
+        Persist a lesson and make it active immediately:
+        1. Save to auto-learned.md (persists across sessions)
+        2. Evict the agent's cached system prompt so next call rebuilds
+           with the lesson included — not just on the next session start
+        3. Inject a visible note into conversation history so the lesson
+           appears in context (the agent reads history, not just system prompt)
+        """
+        from agents.agent import Agent
+        p = self.config["agent_personas"].get(role, {})
+        name = p.get("name", role.upper())
+
+        self.memory.save_auto_skill(role, lesson, "lesson")
+
+        # Force-evict ALL cached prompts for this role so next call rebuilds
+        Agent._prompt_cache = {
+            k: v for k, v in Agent._prompt_cache.items()
+            if k[0] != role
+        }
+
+        # Inject into conversation history so the agent sees it in context,
+        # not just buried in the system prompt — history has stronger influence
+        note = f"[LESSON LEARNED by {name}]: {lesson}"
+        self.messages.append({"role": "assistant", "content": note})
+
+        console.print(
+            f"[dim green]  📚 {p.get('emoji', '')} {name} learned: "
+            f"{lesson[:80]}{'…' if len(lesson) > 80 else ''}[/dim green]"
+        )
+
     def _extract_lesson(self, role: str, failure_context: str, trigger: str) -> None:
         """
         Call haiku to distill a concise, actionable lesson from a failure
-        and save it to the role's auto-learned skill file. Silent — never
-        blocks the main flow.
+        and immediately apply it via _apply_lesson.
         """
         persona = self.config["agent_personas"].get(role, {})
         name = persona.get("name", role.upper())
@@ -615,12 +645,7 @@ class Orchestrator:
                 model="haiku",
             )
             if lesson.strip():
-                path = self.memory.save_auto_skill(role, lesson.strip(), trigger)
-                p = self.config["agent_personas"].get(role, {})
-                console.print(
-                    f"[dim green]  📚 {p.get('emoji','')} {name} learned: "
-                    f"{lesson.strip()[:80]}{'…' if len(lesson) > 80 else ''}[/dim green]"
-                )
+                self._apply_lesson(role, lesson.strip())
         except Exception:
             pass  # non-critical — never block
 
@@ -676,11 +701,7 @@ class Orchestrator:
                 lesson_lines = [response.strip()]
             for lesson in lesson_lines:
                 if lesson:
-                    self.memory.save_auto_skill(role, lesson, "bash-failure-batch")
-                    console.print(
-                        f"[dim green]  📚 {persona.get('emoji','')} {name} learned: "
-                        f"{lesson[:80]}{'…' if len(lesson) > 80 else ''}[/dim green]"
-                    )
+                    self._apply_lesson(role, lesson)
         except Exception:
             pass  # non-critical — never block
 
@@ -782,7 +803,7 @@ class Orchestrator:
                     )
 
                 if lesson.strip():
-                    self.memory.save_auto_skill(role, lesson.strip(), trigger="retrospective")
+                    self._apply_lesson(role, lesson.strip())
                     console.print(
                         f"[{color}]{emoji} {name}[/{color}]  "
                         f"[dim]{lesson.strip()}[/dim]"
@@ -791,7 +812,7 @@ class Orchestrator:
             except Exception as e:
                 console.print(f"[dim yellow]  {name} reflection failed: {e}[/dim yellow]\n")
 
-        console.print("[dim]Retrospective complete. Lessons saved and active from the next session.[/dim]\n")
+        console.print("[dim]Retrospective complete. Lessons saved and active immediately.[/dim]\n")
 
     def add_feedback(self, role_identifier: str, lesson: str) -> None:
         """Save a direct user-provided lesson as a skill for the named agent."""
@@ -802,11 +823,11 @@ class Orchestrator:
                 "[dim]Use @name or role key (sam, jordan, casey, etc.)[/dim]"
             )
             return
+        self._apply_lesson(role, lesson.strip())
         persona = self.config["agent_personas"].get(role, {})
         name = persona.get("name", role.upper())
-        path = self.memory.save_auto_skill(role, lesson.strip(), trigger="manual-feedback")
         console.print(
-            f"\n[green]✓ Feedback saved to {name}'s skills:[/green]  [dim]{lesson.strip()}[/dim]\n"
+            f"\n[green]✓ Feedback saved to {name}'s skills and active immediately:[/green]  [dim]{lesson.strip()}[/dim]\n"
         )
 
     def _save_epic_plan_memory(self, user_input: str, agent_responses: dict):

@@ -371,7 +371,7 @@ Every time a bash command fails or a TDD health check fails after a file write, 
   📚 💻 Sam learned: Never use uv on this machine — use venv\Scripts\python.exe instead.
 ```
 
-No user action needed. The lesson is live from the next message.
+No user action needed. The lesson is **active immediately** — the agent's prompt cache is evicted and the lesson is injected into the conversation history so the very next response reflects it.
 
 **2. From your corrections**
 
@@ -394,16 +394,18 @@ At the end of a session, ask every agent to reflect on their own performance and
 
 💻 Sam reflecting…
   → Never attempt to run pytest without first verifying the import chain is clean
-  ✓ Saved to Sam's skills
+  ✓ Saved to Sam's skills — active immediately
 
 ⚡ Jordan reflecting…
   → Always check all callers of a module before renaming or removing a symbol
-  ✓ Saved to Jordan's skills
+  ✓ Saved to Jordan's skills — active immediately
 
 ✅ Casey reflecting…
   → Before writing tests, confirm the test runner can collect them with --collect-only
-  ✓ Saved to Casey's skills
+  ✓ Saved to Casey's skills — active immediately
 ```
+
+Lessons are injected into the conversation history and the agent's prompt cache is evicted — the very next response reflects the new knowledge. No restart needed.
 
 **`/feedback <agent> <lesson>`** — inject a lesson directly:
 
@@ -412,6 +414,8 @@ At the end of a session, ask every agent to reflect on their own performance and
 /feedback jordan always audit all imports from a file before modifying it
 /feedback casey check venv exists before writing pytest commands
 ```
+
+Feedback also applies immediately — the agent corrects course in the same session without needing a restart.
 
 ### Where lessons are stored
 
