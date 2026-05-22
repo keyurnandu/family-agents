@@ -295,22 +295,16 @@ def main(project: str | None, list_projects: bool, model: str | None):
             continue
 
         # ── Multiline paste mode ──────────────────────────────────────
-        # If the user types """ (alone or at the start of a line),
-        # collect all following lines until another """ — then submit
-        # the whole block as a single message. This prevents pasted
-        # terminal output (e.g. pytest results) from being processed
-        # line-by-line and consuming massive tokens.
+        # Type """ alone to open paste mode. Paste or type your content
+        # in the ··· prompts. Type """ alone on its own line to send it
+        # all as one message. Prevents pasted terminal output (e.g. pytest
+        # results) from being processed line-by-line and consuming tokens.
         if user_input.startswith('"""'):
-            inline = user_input[3:].strip()
             console.print(
-                "[dim]Paste mode — add more lines, then type [bold]\"\"\"[/bold] alone to send.[/dim]"
+                "[dim]Paste mode opened — paste your content below, "
+                "then type [bold]\"\"\"[/bold] on its own line to send.[/dim]"
             )
             lines = []
-            if inline:
-                lines.append(inline)
-                # Show what was already captured so the user doesn't re-type it
-                preview = inline[:80] + ("…" if len(inline) > 80 else "")
-                console.print(f"[dim]  ✓ captured: {preview}[/dim]")
             while True:
                 try:
                     line = Prompt.ask("[dim]  ···[/dim]")
