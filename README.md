@@ -621,6 +621,7 @@ When you describe a new project for the first time, Developer and Lead automatic
 | `src/` / `lib/` / `app/` | Source folders with `.gitkeep` |
 | Entry point | `src/index.js`, `src/main.py`, `src/App.tsx`, etc. with starter boilerplate |
 | Config files | `tsconfig.json`, `.eslintrc`, `pytest.ini`, `Makefile`, etc. as appropriate |
+| `venv/` *(Python only)* | Virtual environment — created automatically via `python -m venv venv && pip install -r requirements.txt` as the final scaffold step |
 
 Tech stack is inferred from your description. Scaffolding runs exactly once — on the first message of a new project. Skipped for general chat and for any project opened via `/load` (the codebase already exists).
 

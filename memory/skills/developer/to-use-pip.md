@@ -20,3 +20,24 @@
 - `venv\Scripts\python.exe app/main.py` ✅
 
 If a venv already exists in the project folder, use it directly — do not recreate it.
+
+### Loaded codebase — always check for venv first
+
+When working on a codebase loaded via /load, before running ANY Python command:
+
+1. Check if `venv\Scripts\python.exe` exists in the project root.
+2. If it does NOT exist, propose creating one BEFORE running tests or the app:
+
+EXEC:bash
+```
+python -m venv venv && venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+3. Only after venv exists, run your actual command:
+
+EXEC:bash
+```
+venv\Scripts\python.exe -m pytest tests/ -v
+```
+
+Never assume a venv exists on a freshly cloned or loaded project.

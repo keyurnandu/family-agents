@@ -788,7 +788,13 @@ class Orchestrator:
             "- Use relative paths from the project root.\n"
             "- Every file must have real starter content — no empty files except .gitkeep.\n"
             "- Follow the conventions of the chosen stack exactly.\n"
-            "- Do NOT ask for permission or confirmation — output all EXEC: blocks now."
+            "- Do NOT ask for permission or confirmation — output all EXEC: blocks now.\n\n"
+            "Virtual environment (Python projects only):\n"
+            "- If the project is Python-based, add a FINAL EXEC:bash block after all files that:\n"
+            "  1. Creates the venv:   python -m venv venv\n"
+            "  2. Installs deps:      venv\\Scripts\\python.exe -m pip install -r requirements.txt\n"
+            "- Use a single EXEC:bash block for both commands chained with &&.\n"
+            "- Skip this entirely for non-Python projects (Node, Go, Rust, Java, etc.)."
         )
 
         # Run Developer and Lead in parallel for scaffolding
