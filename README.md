@@ -815,6 +815,7 @@ Six intelligence layers run automatically every turn:
 | **Confidence escalation** | If Haiku produces a thin plan for a complex message (single agent, vague task), routing automatically re-runs with Sonnet |
 | **Intent verification** | After agents respond, a heuristic check detects if the user asked for code but only got prose — surfaces a clear warning |
 | **State-aware next steps** | Aria's synthesis reads `state.md` to suggest concrete next actions (e.g. "auth is done → write tests") instead of generic options |
+| **Auto-retry after lesson** | When a bash command or health check fails, the agent learns a lesson AND immediately retries to fix the problem in the same turn — no manual re-send needed |
 
 ### Routing speed
 

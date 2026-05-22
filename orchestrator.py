@@ -1112,6 +1112,85 @@ class Orchestrator:
         threading.Thread(target=_update, daemon=True).start()
 
     # ------------------------------------------------------------------
+    # Auto-retry after lesson — agent fixes its own failure immediately
+    # ------------------------------------------------------------------
+
+    def _retry_after_lesson(
+        self,
+        role: str,
+        failures: list[str],
+        write_dir: Path,
+        tdd_health_cmd: str | None,
+        tdd_cwd: Path | None,
+    ) -> list[str]:
+        """
+        Immediately re-invoke the agent after it learned from a failure.
+        The lesson is already in context (injected by _apply_lesson) — this
+        just tells the agent "apply what you just learned and fix it now."
+
+        Called at most once per role per phase to prevent infinite loops.
+        Returns the new outcome strings from the retry attempt.
+        """
+        agent = self.agents.get(role)
+        if not agent:
+            return []
+
+        p = self.config["agent_personas"].get(role, {})
+        name = p.get("name", role.upper())
+        color = p.get("color", "white")
+        emoji = p.get("emoji", "")
+
+        failure_summary = "\n\n".join(failures[:2])  # cap at 2 failures
+
+        console.print(
+            f"\n[{color}]{emoji} {name} retrying after lesson…[/{color}]  "
+            "[dim](applying what was just learned)[/dim]"
+        )
+
+        retry_task = (
+            "Your previous attempt just failed and you immediately learned a lesson from it. "
+            "That lesson is now in your context. Apply it and fix the problem now.\n\n"
+            f"What failed:\n{failure_summary[:1200]}\n\n"
+            "Produce the corrected file(s) or command using EXEC: blocks. "
+            "Do not explain — just fix it."
+        )
+
+        try:
+            with console.status(
+                f"[{color}]{emoji} {name} fixing…[/{color}]", spinner="dots"
+            ):
+                response = agent.respond(
+                    task=retry_task,
+                    context="Auto-retry after lesson — apply the lesson and correct the failure.",
+                    history_text=self._format_history(limit=4),
+                )
+        except KeyboardInterrupt:
+            console.print("\n[yellow]⚡ Retry interrupted.[/yellow]")
+            return []
+        except Exception as e:
+            console.print(f"[dim yellow]  Retry error: {e}[/dim yellow]")
+            return []
+
+        self.display.show_agent_response(
+            name, self._strip_exec_for_display(response), color, emoji
+        )
+
+        retry_outcomes: list[str] = []
+        retry_actions = parse_actions(response, name)
+        if retry_actions:
+            retry_outcomes = prompt_and_execute(
+                retry_actions,
+                write_dir,
+                tdd_health_cmd=tdd_health_cmd,
+                tdd_cwd=tdd_cwd,
+            )
+        elif not retry_actions:
+            # Agent gave a text-only response — still useful, treat as an outcome note
+            retry_outcomes = [f"RETRY NOTE from {name}: {response[:400]}"]
+
+        return retry_outcomes
+
+    # ------------------------------------------------------------------
     # Clarification gate — ask one question before routing big vague tasks
     # ------------------------------------------------------------------
 
@@ -1679,6 +1758,27 @@ class Orchestrator:
                         # Auto-extract lessons from failures
                         self._check_outcomes_for_lessons(role, outcomes)
 
+                        # ── Auto-retry after lesson ──────────────────────
+                        # If any action failed AND a lesson was just learned,
+                        # the agent already has the lesson in context — re-invoke
+                        # it immediately so it applies the fix in the same turn.
+                        # Capped at 1 retry per role per phase (no infinite loops).
+                        fixable_failures = [
+                            o for o in outcomes
+                            if o.startswith("BASH FAILED") or o.startswith("HEALTH_CHECK: FAILED")
+                        ]
+                        if fixable_failures:
+                            retry_outcomes = self._retry_after_lesson(
+                                role=role,
+                                failures=fixable_failures,
+                                write_dir=write_dir,
+                                tdd_health_cmd=_tdd_health_cmd if _tdd_enabled else None,
+                                tdd_cwd=_tdd_cwd,
+                            )
+                            if retry_outcomes:
+                                phase_responses[role] += "\n\nRETRY OUTCOMES:\n" + "\n".join(retry_outcomes)
+                        # ─────────────────────────────────────────────────
+
                 # Auto-extract REMEMBER: markers
                 saved_count = self.memory.extract_and_save_memories(response, role)
                 if saved_count:
@@ -1880,6 +1980,22 @@ class Orchestrator:
             outcomes = prompt_and_execute(actions, write_dir)
             if outcomes:
                 response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                self._check_outcomes_for_lessons(role, outcomes)
+                # Auto-retry on failure (same as phase loop)
+                fixable_failures = [
+                    o for o in outcomes
+                    if o.startswith("BASH FAILED") or o.startswith("HEALTH_CHECK: FAILED")
+                ]
+                if fixable_failures:
+                    retry_outcomes = self._retry_after_lesson(
+                        role=role,
+                        failures=fixable_failures,
+                        write_dir=write_dir,
+                        tdd_health_cmd=None,
+                        tdd_cwd=None,
+                    )
+                    if retry_outcomes:
+                        response += "\n\nRETRY OUTCOMES:\n" + "\n".join(retry_outcomes)
 
         self.memory.extract_and_save_memories(response, role)
         self.db.save_message(self.project_name, "assistant", response)
