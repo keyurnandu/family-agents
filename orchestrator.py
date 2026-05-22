@@ -2225,14 +2225,48 @@ class Orchestrator:
                 if f.is_file() and f.name != ".gitkeep"
             ]
 
+        # ── Check for an existing doc of the same type ──────────────
+        docs_dir = project_dir / "docs"
+        existing_doc_path: Path | None = None
+        existing_doc_content: str = ""
+        if docs_dir.exists():
+            candidates = sorted(
+                docs_dir.glob(f"{doc_type}*.md"),
+                key=lambda f: f.stat().st_mtime,
+                reverse=True,
+            )
+            if candidates:
+                existing_doc_path = candidates[0]
+                try:
+                    existing_doc_content = existing_doc_path.read_text(
+                        encoding="utf-8", errors="replace"
+                    )
+                except Exception:
+                    existing_doc_content = ""
+
+        # ── Build the export prompt ─────────────────────────────────
+        existing_section = ""
+        if existing_doc_path and existing_doc_content:
+            existing_section = (
+                f"## Existing Document: {existing_doc_path.name}\n"
+                f"A previous version of this document already exists. "
+                f"Update and enhance it — do not start from scratch. "
+                f"Preserve any content that is still accurate, add new information from "
+                f"recent conversations and memory, and remove anything outdated.\n\n"
+                f"{existing_doc_content}\n\n"
+            )
+
         export_prompt = (
             f"Project: {self.project_name}\n"
             f"Document to produce: {doc_type}\n\n"
             f"## Project Memory\n{memory_text}\n\n"
             f"## Recent Conversation\n{history_text or 'No history.'}\n\n"
-            f"## Files Created So Far\n" + ("\n".join(file_list) if file_list else "None yet.") + "\n\n"
-            f"Write a complete, well-structured {doc_type} in Markdown format. "
-            f"Base it entirely on what has been discussed and decided. "
+            + (existing_section if existing_section else "")
+            + f"## Files Created So Far\n" + ("\n".join(file_list) if file_list else "None yet.") + "\n\n"
+            f"Write the COMPLETE, full-length {doc_type} in Markdown format. "
+            f"This is a document generation task — ignore any brevity rules. "
+            f"Output the entire document with no truncation, no matter how long. "
+            f"Base it on what has been discussed, decided, and documented. "
             f"Use proper headings, tables where appropriate, and be thorough. "
             f"Do NOT use EXEC: blocks — output only the document content."
         )
@@ -2261,12 +2295,15 @@ class Orchestrator:
             console.print("\n[yellow]⚡ Export interrupted.[/yellow]")
             return
 
-        # Save to docs/
-        docs_dir = project_dir / "docs"
+        # Save to docs/ — overwrite existing doc of the same type if found
         docs_dir.mkdir(parents=True, exist_ok=True)
-        date_str = datetime.now().strftime("%Y-%m-%d")
-        filename = f"{doc_type}-{date_str}.md"
-        out_path = docs_dir / filename
+        if existing_doc_path:
+            out_path = existing_doc_path  # overwrite in place
+            filename = existing_doc_path.name
+        else:
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            filename = f"{doc_type}-{date_str}.md"
+            out_path = docs_dir / filename
         out_path.write_text(content, encoding="utf-8")
 
         # Show a clean confirmation — no truncated preview spam.
@@ -2299,7 +2336,7 @@ class Orchestrator:
                 f"This is a {doc_type} document. Extract the most important items as "
                 f"4-8 bullet points (epics, user stories, key decisions, scope, tech choices — "
                 f"whatever matters most). Each bullet max 90 chars. Start each with •\n\n"
-                f"Document:\n{content[:5000]}"
+                f"Document:\n{content[:10000]}"
             )
             summary = call_claude(
                 prompt=summary_prompt,

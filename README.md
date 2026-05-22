@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-76 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization) without requiring an LLM connection.
+81 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization) without requiring an LLM connection.
 
 ---
 
@@ -706,7 +706,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 76 tests — all TDD, run with `pytest`
+├── tests/                    # 81 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -721,7 +721,8 @@ family-agents/
 │   ├── test_state_lock.py    # Threading lock on state updates
 │   ├── test_role_trim.py     # Shared EXEC instructions, role file limits
 │   ├── test_peer_consult.py  # Bench agent consultation via ASK_COLLEAGUE
-│   └── test_path_length.py   # Windows path normalization (WinError 206, multi-dir)
+│   ├── test_path_length.py   # Windows path normalization (WinError 206, multi-dir)
+│   └── test_export_doc.py    # Doc export: update existing, no truncation
 ├── config/
 │   └── settings.yaml         # Model, team roster, agent personas
 ├── pytest.ini                # Test configuration
