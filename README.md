@@ -84,8 +84,10 @@ On launch you get a single `You:` prompt. The screen shows your saved projects (
 
 Type a number to resume, a name to start new, just start talking for adhoc questions, or /help.
 
-You: _
+You (sonnet): _
 ```
+
+The prompt always shows which model is active. It updates live when you `/model` switch.
 
 | Input | What happens |
 |---|---|
@@ -102,7 +104,7 @@ You: _
 
 **Normal message** — Aria routes automatically to the right agents, who work in parallel within each phase:
 ```
-You: build a login page with HTML, CSS, and JS
+You (sonnet): build a login page with HTML, CSS, and JS
 → Sam (Developer) and Jordan (Lead) work simultaneously
 → Aria synthesizes their responses
 ```
@@ -121,17 +123,17 @@ Both the friendly name (`@sam`) and the role key (`@developer`) are accepted.
 
 **General chat** — no project needed. Just start talking and the team answers:
 ```
-You: what's the difference between REST and GraphQL?
-You: how should I structure a Node.js monorepo?
-You: @sam what are your capabilities?
+You (sonnet): what's the difference between REST and GraphQL?
+You (sonnet): how should I structure a Node.js monorepo?
+You (sonnet): @sam what are your capabilities?
 ```
 Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch` to move into a project anytime.
 
-**Switch model mid-session** — no need to restart:
+**Switch model mid-session** — no need to restart. The prompt updates immediately:
 ```
-/model haiku    # switch to faster/cheaper for simple questions
-/model opus     # switch to most powerful for deep analysis
-/model sonnet   # back to default
+/model haiku    → You (haiku): _
+/model opus     → You (opus): _
+/model sonnet   → You (sonnet): _
 /model          # show what's currently active
 ```
 
@@ -140,7 +142,7 @@ Saved as **💬 General chat** so nothing is lost. Use `/new <name>` or `/switch
 **Paste mode** — paste multi-line content (pytest output, error logs, long prompts) as a single message instead of line-by-line:
 
 ```
-You: /paste
+You (sonnet): /paste
 Paste mode opened — paste your content below, then type /end to send.
   ···: FAILED tests/test_api.py::test_login - AssertionError
   ···: FAILED tests/test_api.py::test_logout - ImportError
@@ -191,10 +193,10 @@ After a project conversation, generate clean documents directly from what's been
 
 **Natural language:**
 ```
-You: generate a requirements doc
-You: export the architecture decisions
-You: create a sprint plan from what we've discussed
-You: write a technical spec
+You (sonnet): generate a requirements doc
+You (sonnet): export the architecture decisions
+You (sonnet): create a sprint plan from what we've discussed
+You (sonnet): write a technical spec
 ```
 
 **Command:**
@@ -240,7 +242,7 @@ This means in a new session the team already knows your requirements, epics, and
 
 ```
 New session, project: my-app
-You: implement the login epic from the requirements
+You (sonnet): implement the login epic from the requirements
 
 → Sam already has the full requirements doc
 → Knows: Epic 1 = Authentication (login, register, password reset)
@@ -386,7 +388,7 @@ No user action needed. The lesson is **active immediately** — the agent's prom
 When you correct an agent's approach, the lesson is automatically detected and saved:
 
 ```
-You: stop using uv — it's not installed, use venv\Scripts\python.exe
+You (sonnet): stop using uv — it's not installed, use venv\Scripts\python.exe
 
   📚 💻 Sam learned: Never use uv on this machine — always use venv\Scripts\python.exe directly.
 ```
@@ -454,10 +456,10 @@ Any agent can be taught new skills that persist across all projects and sessions
 
 ### Natural language — just tell the team:
 ```
-You: teach sam React Native
-You: the dev team needs to learn AWS
-You: morgan should know event storming
-You: add GraphQL expertise to jordan
+You (sonnet): teach sam React Native
+You (sonnet): the dev team needs to learn AWS
+You (sonnet): morgan should know event storming
+You (sonnet): add GraphQL expertise to jordan
 ```
 
 ### Command:
@@ -521,10 +523,10 @@ A panel confirms what was found:
 Once loaded, just chat normally — agents know the full structure and key file contents:
 
 ```
-You: review the architecture and flag any concerns
-You: @jordan what would you change about this API design?
-You: @casey what test coverage is missing?
-You: how does the authentication flow work?
+You (sonnet): review the architecture and flag any concerns
+You (sonnet): @jordan what would you change about this API design?
+You (sonnet): @casey what test coverage is missing?
+You (sonnet): how does the authentication flow work?
 ```
 
 If an agent needs to go deeper into a specific file, it requests it automatically with `READ_FILE:<path>` — no action needed from you.
@@ -535,17 +537,17 @@ Simple file-read requests are served directly from disk — **zero LLM calls**, 
 
 **Exact filename** (any file with an extension):
 ```
-You: show config.py
-You: read sprint.md
-You: display src/auth/middleware.ts
-You: show full requirements.txt      ← no truncation, complete file
+You (sonnet): show config.py
+You (sonnet): read sprint.md
+You (sonnet): display src/auth/middleware.ts
+You (sonnet): show full requirements.txt      ← no truncation, complete file
 ```
 
 **Fuzzy doc name** (keywords matched against your exported docs folder — no extension needed):
 ```
-You: read the sprint details          → matches sprint-plan-2026-05-20.md
-You: show epics and stories           → matches epics-and-user-stories-*.md
-You: can you read the requirements    → matches requirements-doc-*.md
+You (sonnet): read the sprint details          → matches sprint-plan-2026-05-20.md
+You (sonnet): show epics and stories           → matches epics-and-user-stories-*.md
+You (sonnet): can you read the requirements    → matches requirements-doc-*.md
 ```
 
 Works with intent words: `read`, `show`, `display`, `view`, `open`, `print`, `cat`, `get`, `fetch`, `see`. The file is shown with syntax highlighting and line numbers.
