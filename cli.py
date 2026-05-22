@@ -301,12 +301,16 @@ def main(project: str | None, list_projects: bool, model: str | None):
         # terminal output (e.g. pytest results) from being processed
         # line-by-line and consuming massive tokens.
         if user_input.startswith('"""'):
+            inline = user_input[3:].strip()
             console.print(
-                "[dim]Paste mode — enter your content, then type [bold]\"\"\"[/bold] on its own line to send.[/dim]"
+                "[dim]Paste mode — add more lines, then type [bold]\"\"\"[/bold] alone to send.[/dim]"
             )
             lines = []
-            if user_input[3:].strip():          # content after opening """
-                lines.append(user_input[3:].strip())
+            if inline:
+                lines.append(inline)
+                # Show what was already captured so the user doesn't re-type it
+                preview = inline[:80] + ("…" if len(inline) > 80 else "")
+                console.print(f"[dim]  ✓ captured: {preview}[/dim]")
             while True:
                 try:
                     line = Prompt.ask("[dim]  ···[/dim]")
