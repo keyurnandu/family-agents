@@ -553,8 +553,8 @@ class TestAutoPilotDecision:
         assert isinstance(result["continue"], bool)
 
     def test_auto_pilot_caps_iterations(self, base_dir, config):
-        """Auto-pilot should stop after MAX_AUTO_ITERATIONS."""
-        from orchestrator import Orchestrator, MAX_AUTO_ITERATIONS
+        """Auto-pilot should stop after AUTO_CHECKPOINT_INTERVAL (normal mode)."""
+        from orchestrator import Orchestrator, AUTO_CHECKPOINT_INTERVAL
         from utils.db_manager import DBManager
         from utils.display import Display
 
@@ -562,13 +562,13 @@ class TestAutoPilotDecision:
         display = Display()
         orch = Orchestrator("test", base_dir, db, display, config=config)
 
-        # Simulate already at max iterations
+        # Simulate already at checkpoint interval (normal mode, not /auto)
         with patch("orchestrator.call_claude_json") as mock_json:
             mock_json.return_value = {"continue": True, "next_message": "keep going"}
             result = orch._auto_pilot_decide(
                 user_input="build the auth system",
                 final_response="Done phase 1",
-                iteration=MAX_AUTO_ITERATIONS,
+                iteration=AUTO_CHECKPOINT_INTERVAL,
             )
         # Should force-stop regardless of what haiku says
         assert result["continue"] is False
@@ -845,7 +845,7 @@ class TestAutoPilotResume:
 
     def test_pending_autopilot_saved_on_cap(self, base_dir, config):
         """When auto-pilot hits the iteration cap, _pending_autopilot should be set."""
-        from orchestrator import Orchestrator, MAX_AUTO_ITERATIONS
+        from orchestrator import Orchestrator, AUTO_CHECKPOINT_INTERVAL
         from utils.db_manager import DBManager
         from utils.display import Display
 
@@ -870,6 +870,69 @@ class TestAutoPilotResume:
 
         assert orch._pending_autopilot is not None
         assert orch._pending_autopilot["original_request"] == "build a big app"
+        assert orch._pending_autopilot["reason"] == "cap_reached"
+
+    def test_auto_mode_continues_past_checkpoint(self, base_dir, config):
+        """In /auto mode, auto-pilot should auto-reset at checkpoints and run past AUTO_CHECKPOINT_INTERVAL."""
+        from orchestrator import Orchestrator, AUTO_CHECKPOINT_INTERVAL
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+        orch._turn_auto = True  # /auto mode
+
+        call_count = 0
+        target_iterations = AUTO_CHECKPOINT_INTERVAL + 2  # Run past one checkpoint
+
+        def mock_decide(user_input, final_response, iteration=0, previous_messages=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count <= target_iterations:
+                return {"continue": True, "next_message": f"Step {call_count}"}
+            return {"continue": False, "next_message": ""}
+
+        def mock_process(msg):
+            orch.messages.append({"role": "assistant", "content": f"Done: {msg}"})
+
+        with patch.object(orch, "_auto_pilot_decide", side_effect=mock_decide), \
+             patch.object(orch, "process", side_effect=mock_process):
+            orch._run_autopilot_loop("build a big app", "Requirements ready.")
+
+        # Should have run past the checkpoint interval
+        assert call_count == target_iterations + 1  # +1 for the final "no more work" call
+        # Should be complete (not cap_reached) since Haiku said stop
+        assert orch._pending_autopilot is None
+
+    def test_normal_mode_pauses_at_checkpoint(self, base_dir, config):
+        """In normal mode (no /auto), auto-pilot should pause at AUTO_CHECKPOINT_INTERVAL."""
+        from orchestrator import Orchestrator, AUTO_CHECKPOINT_INTERVAL
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+        orch._turn_auto = False  # normal mode
+
+        call_count = 0
+
+        def mock_decide(user_input, final_response, iteration=0, previous_messages=None):
+            nonlocal call_count
+            call_count += 1
+            return {"continue": True, "next_message": f"Step {call_count}"}
+
+        def mock_process(msg):
+            orch.messages.append({"role": "assistant", "content": f"Done: {msg}"})
+
+        with patch.object(orch, "_auto_pilot_decide", side_effect=mock_decide), \
+             patch.object(orch, "process", side_effect=mock_process):
+            orch._run_autopilot_loop("build a big app", "Requirements ready.")
+
+        # Should pause at exactly the checkpoint interval
+        assert call_count == AUTO_CHECKPOINT_INTERVAL
+        assert orch._pending_autopilot is not None
         assert orch._pending_autopilot["reason"] == "cap_reached"
 
     def test_pending_autopilot_saved_on_failure(self, base_dir, config):
@@ -1040,7 +1103,7 @@ class TestAutoPilotResume:
              patch.object(orch, "process", side_effect=mock_process):
             orch._run_autopilot_loop("build auth", "Code written.")
 
-        # Should have stopped after 1 iteration, not continued to MAX_AUTO_ITERATIONS
+        # Should have stopped after 1 iteration, not continued to AUTO_CHECKPOINT_INTERVAL
         assert call_count == 1
         # Should NOT save pending (user interrupted)
         assert orch._pending_autopilot is None

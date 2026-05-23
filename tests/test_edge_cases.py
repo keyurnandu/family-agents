@@ -435,7 +435,9 @@ class TestFailureMarkers:
         assert any("BASH" in m for m in markers)
         assert any("HEALTH" in m for m in markers)
 
-    def test_max_auto_iterations_is_sane(self):
-        from orchestrator import MAX_AUTO_ITERATIONS
+    def test_auto_checkpoint_interval_is_sane(self):
+        from orchestrator import AUTO_CHECKPOINT_INTERVAL, AUTO_HARD_CEILING
 
-        assert 2 <= MAX_AUTO_ITERATIONS <= 10, "MAX_AUTO_ITERATIONS out of sane range"
+        assert 2 <= AUTO_CHECKPOINT_INTERVAL <= 10, "AUTO_CHECKPOINT_INTERVAL out of sane range"
+        assert AUTO_HARD_CEILING > AUTO_CHECKPOINT_INTERVAL, "Hard ceiling must exceed checkpoint interval"
+        assert AUTO_HARD_CEILING <= 100, "AUTO_HARD_CEILING unreasonably large"

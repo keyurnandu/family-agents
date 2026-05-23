@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-214 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+216 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
 
 ---
 
@@ -302,19 +302,33 @@ Aria automatically decides the next logical step after every turn that produces 
 
 For simple Q&A or informational responses, Aria stops and waits for your input.
 
+**Normal mode** — pauses every 5 iterations for manual "continue":
+
 ```
 You (sonnet): build the auth system with JWT
 
 🤖 Auto-pilot  iteration 1/5  Now implement the login endpoint…
 🤖 Auto-pilot  iteration 2/5  Write tests for the auth middleware…
-🤖 Auto-pilot  iteration 3/5  Implement the registration flow…
-
+…
 ⚠ Auto-pilot reached 5 iterations — pausing for your input.
   💡 Work may be incomplete. Type continue to resume auto-pilot.
 
 You: continue
 🤖 Auto-pilot resuming  original: build the auth system with JWT
-🤖 Auto-pilot  iteration 1/5  Add rate limiting to login endpoint…
+```
+
+**`/auto` mode** — fully hands-off. Aria auto-resets at each 5-iteration checkpoint if no issues are detected, running up to 50 iterations without intervention:
+
+```
+/auto on
+You (sonnet): build the entire auth system
+
+🤖 Auto-pilot  iteration 1/50  Implement login endpoint…
+…
+🔄 Checkpoint  5 iterations completed — no issues detected, continuing…
+🤖 Auto-pilot  iteration 6/50  Write integration tests…
+…
+  ✓ Auto-pilot completed — no further steps needed.
 ```
 
 Press **Ctrl+C** at any time to interrupt the auto-pilot loop. Type **continue**, **resume**, or **go** to pick up where it left off.
@@ -327,7 +341,7 @@ Auto-pilot has three built-in guards that prevent getting stuck:
 |---|---|
 | **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
-| **Hard cap** | After 5 iterations, always pauses for your input regardless of what Aria decides |
+| **Checkpoint cap** | Normal mode: pauses every 5 iterations for manual "continue". `/auto` mode: auto-resets at each checkpoint, hard ceiling at 50 iterations |
 | **Resume on incomplete** | When auto-pilot stops prematurely (cap, failure, or duplicate loop), it saves context and prompts you to type `continue` to resume where it left off |
 
 ---
@@ -762,7 +776,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 214 tests — all TDD, run with `pytest`
+├── tests/                    # 216 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching

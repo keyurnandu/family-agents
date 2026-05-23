@@ -18,11 +18,12 @@ from utils.memory_manager import MemoryManager
 
 console = Console()
 
-# Safety cap for auto-pilot continuation loop — prevents runaway iterations.
-# In /auto mode the cap is raised so the system can complete multi-phase
-# tasks without pausing for manual "continue" input.
-MAX_AUTO_ITERATIONS = 5
-MAX_AUTO_ITERATIONS_AUTO_MODE = 15
+# Auto-pilot iteration control:
+# - Normal mode: pauses every CHECKPOINT_INTERVAL iterations for manual "continue"
+# - /auto mode: Aria auto-resets at each checkpoint if no issues detected,
+#   up to AUTO_HARD_CEILING total iterations (absolute safety net).
+AUTO_CHECKPOINT_INTERVAL = 5
+AUTO_HARD_CEILING = 50
 
 # Directories to ignore when scanning project/codebase folder trees.
 # Shared between _scan_codebase() and _update_project_state().
@@ -1260,7 +1261,12 @@ class Orchestrator:
     def _run_autopilot_loop(self, user_input: str, pilot_context: str) -> None:
         """Run the auto-pilot continuation loop.
 
-        Capped at MAX_AUTO_ITERATIONS. Tracks WHY the loop stopped:
+        In normal mode: pauses every AUTO_CHECKPOINT_INTERVAL iterations for
+        manual 'continue'.  In /auto mode: Aria auto-resets at each checkpoint
+        if no issues (failures, duplicates), up to AUTO_HARD_CEILING total
+        iterations as an absolute safety net.
+
+        Tracks WHY the loop stopped:
         - "complete": Haiku decided all work is done → clears _pending_autopilot
         - "cap_reached" / "failure_no_progress" / "duplicate_loop": premature stop
           → saves _pending_autopilot so user can type 'continue' to resume
@@ -1274,9 +1280,27 @@ class Orchestrator:
         pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
         _pilot_context = pilot_context
         _stop_reason = "complete"
-        cap = MAX_AUTO_ITERATIONS_AUTO_MODE if self._turn_auto else MAX_AUTO_ITERATIONS
 
-        while iteration < cap:
+        # In /auto mode the hard ceiling is much higher — Aria auto-resets at
+        # each checkpoint interval.  In normal mode we pause at each checkpoint.
+        hard_cap = AUTO_HARD_CEILING if self._turn_auto else AUTO_CHECKPOINT_INTERVAL
+
+        while iteration < hard_cap:
+            # ── Checkpoint gate ─────────────────────────────────────────
+            # Every AUTO_CHECKPOINT_INTERVAL iterations, pause or auto-reset.
+            if iteration > 0 and iteration % AUTO_CHECKPOINT_INTERVAL == 0:
+                if self._turn_auto:
+                    # /auto mode: log checkpoint and keep going
+                    console.print(
+                        f"\n[bold bright_cyan]🔄 Checkpoint[/bold bright_cyan]  "
+                        f"[dim]{iteration} iterations completed — "
+                        f"no issues detected, continuing…[/dim]"
+                    )
+                else:
+                    # Normal mode: pause for manual resume
+                    _stop_reason = "cap_reached"
+                    break
+
             try:
                 decision = self._auto_pilot_decide(
                     user_input=user_input,
@@ -1316,7 +1340,7 @@ class Orchestrator:
 
             console.print(
                 f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
-                f"[dim]iteration {iteration}/{cap}[/dim]  "
+                f"[dim]iteration {iteration}/{hard_cap}[/dim]  "
                 f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
                 f"{cost_hint}"
             )
@@ -1350,14 +1374,14 @@ class Orchestrator:
                     _pilot_context, user_input
                 )
         else:
-            # while loop exhausted — iteration reached cap
+            # while loop exhausted — iteration reached hard cap
             _stop_reason = "cap_reached"
 
         self._auto_pilot_active = False
 
         if _stop_reason == "cap_reached":
             console.print(
-                f"\n[yellow]⚠ Auto-pilot reached {cap} iterations — "
+                f"\n[yellow]⚠ Auto-pilot reached {iteration} iterations — "
                 "pausing for your input.[/yellow]"
             )
 
@@ -1462,7 +1486,7 @@ class Orchestrator:
         proceed automatically. Returns {"continue": bool, "next_message": str}.
 
         Safety guards (checked BEFORE the Haiku call — zero-cost):
-        1. Hard cap: iteration >= MAX_AUTO_ITERATIONS → stop
+        1. Hard cap: iteration >= hard ceiling → stop
         2. Failure exit: if final_response contains BASH FAILED or
            HEALTH_CHECK: FAILED → stop UNLESS RETRY OUTCOMES shows the
            agent already self-healed (all retry entries are OK/PASSED)
@@ -1472,8 +1496,8 @@ class Orchestrator:
         _STOP = {"continue": False, "next_message": ""}
 
         # Guard 1: hard iteration cap
-        _cap = MAX_AUTO_ITERATIONS_AUTO_MODE if self._turn_auto else MAX_AUTO_ITERATIONS
-        if iteration >= _cap:
+        _hard_cap = AUTO_HARD_CEILING if self._turn_auto else AUTO_CHECKPOINT_INTERVAL
+        if iteration >= _hard_cap:
             return _STOP
 
         # Guard 2: failure exit — stop if the last iteration had unresolved
@@ -1502,7 +1526,7 @@ class Orchestrator:
                     f"Original customer request: {user_input}\n\n"
                     f"Latest team output:\n{final_response[:1500]}\n\n"
                     + (f"Project state:\n{state_context}\n\n" if state_context else "")
-                    + f"Iteration {iteration + 1} of {_cap}.\n\n"
+                    + f"Iteration {iteration + 1} of {_hard_cap}.\n\n"
                     "Is there a clear, concrete next step the team should do RIGHT NOW "
                     "to fulfil the original request? Continue if there is actionable work "
                     "remaining — implementation, testing, documentation, planning, or "
@@ -2400,7 +2424,7 @@ class Orchestrator:
         # when the turn produced actionable work (multi-phase routing or
         # EXEC blocks executed). Not gated by /auto — that only controls
         # auto-approve for file writes and safe bash.
-        # Capped at MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
+        # Capped at AUTO_HARD_CEILING (/auto) or AUTO_CHECKPOINT_INTERVAL (normal). Ctrl+C breaks out.
         _actionable = self._has_actionable_work(agent_responses, phases)
         if _actionable and agent_responses and self.project_name != "_general" \
                 and not getattr(self, "_auto_pilot_active", False):
