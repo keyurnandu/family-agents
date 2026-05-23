@@ -18,8 +18,11 @@ from utils.memory_manager import MemoryManager
 
 console = Console()
 
-# Safety cap for auto-pilot continuation loop — prevents runaway iterations
+# Safety cap for auto-pilot continuation loop — prevents runaway iterations.
+# In /auto mode the cap is raised so the system can complete multi-phase
+# tasks without pausing for manual "continue" input.
 MAX_AUTO_ITERATIONS = 5
+MAX_AUTO_ITERATIONS_AUTO_MODE = 15
 
 # Directories to ignore when scanning project/codebase folder trees.
 # Shared between _scan_codebase() and _update_project_state().
@@ -1271,8 +1274,9 @@ class Orchestrator:
         pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
         _pilot_context = pilot_context
         _stop_reason = "complete"
+        cap = MAX_AUTO_ITERATIONS_AUTO_MODE if self._turn_auto else MAX_AUTO_ITERATIONS
 
-        while iteration < MAX_AUTO_ITERATIONS:
+        while iteration < cap:
             try:
                 decision = self._auto_pilot_decide(
                     user_input=user_input,
@@ -1312,7 +1316,7 @@ class Orchestrator:
 
             console.print(
                 f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
-                f"[dim]iteration {iteration}/{MAX_AUTO_ITERATIONS}[/dim]  "
+                f"[dim]iteration {iteration}/{cap}[/dim]  "
                 f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
                 f"{cost_hint}"
             )
@@ -1346,14 +1350,14 @@ class Orchestrator:
                     _pilot_context, user_input
                 )
         else:
-            # while loop exhausted — iteration reached MAX_AUTO_ITERATIONS
+            # while loop exhausted — iteration reached cap
             _stop_reason = "cap_reached"
 
         self._auto_pilot_active = False
 
         if _stop_reason == "cap_reached":
             console.print(
-                f"\n[yellow]⚠ Auto-pilot reached {MAX_AUTO_ITERATIONS} iterations — "
+                f"\n[yellow]⚠ Auto-pilot reached {cap} iterations — "
                 "pausing for your input.[/yellow]"
             )
 
@@ -1468,7 +1472,8 @@ class Orchestrator:
         _STOP = {"continue": False, "next_message": ""}
 
         # Guard 1: hard iteration cap
-        if iteration >= MAX_AUTO_ITERATIONS:
+        _cap = MAX_AUTO_ITERATIONS_AUTO_MODE if self._turn_auto else MAX_AUTO_ITERATIONS
+        if iteration >= _cap:
             return _STOP
 
         # Guard 2: failure exit — stop if the last iteration had unresolved
@@ -1497,7 +1502,7 @@ class Orchestrator:
                     f"Original customer request: {user_input}\n\n"
                     f"Latest team output:\n{final_response[:1500]}\n\n"
                     + (f"Project state:\n{state_context}\n\n" if state_context else "")
-                    + f"Iteration {iteration + 1} of {MAX_AUTO_ITERATIONS}.\n\n"
+                    + f"Iteration {iteration + 1} of {_cap}.\n\n"
                     "Is there a clear, concrete next step the team should do RIGHT NOW "
                     "to fulfil the original request? Continue if there is actionable work "
                     "remaining — implementation, testing, documentation, planning, or "
