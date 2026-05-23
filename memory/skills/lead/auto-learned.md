@@ -130,3 +130,6 @@ Never pipe pytest output through Unix utilities like `tail` in Windows cmd/batch
 
 ### [2026-05-23 04:36] via lesson
 Before running pytest against tests/test_auth.py, tests/test_database.py, and tests/test_projects.py, verify MongoDB is running — the 19 ERROR entries (not FAILED) indicate fixture initialization failures from missing service dependencies.
+
+### [2026-05-23 08:21] via lesson
+Never debug individual test assertions when all tests in a file error identically—it's always a setup/fixture issue. Before investigating test logic, verify that required input files (like the OpenAPI spec) exist and are accessible to the test.

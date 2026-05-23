@@ -52,3 +52,18 @@ Never use Unix commands like `ls` on Windows systems; use the Glob tool for file
 
 ### [2026-05-23 05:10] via lesson
 Before running `git add` with specific file paths, verify those files exist in the repository using the Glob tool, since attempting to add non-existent files fails silently.
+
+### [2026-05-23 05:18] via lesson
+Before using `git add path1 path2 path3`, verify all paths appear in `git status` output — missing files cause exit 1 failures.
+
+### [2026-05-23 05:21] via lesson
+Before running `git add` with specific file paths, verify those files actually exist in the working tree. This command failed because `.github/workflows/ci.yml`, `scripts/audit_browsers.py`, and `tests/conftest.py` don't appear in the git status output.
+
+### [2026-05-23 05:25] via lesson
+Before running `git commit -m`, run `git status` to verify changes are staged, or use `git commit -a -m` to stage and commit tracked changes in one command.
+
+### [2026-05-23 05:31] via lesson
+Before running `git commit`, always stage changes first with `git add -A` or use `git commit -a` to stage and commit in one command. The `git commit -m` command alone doesn't automatically stage unstaged files.
+
+### [2026-05-23 05:37] via lesson
+Always run `git add` to stage files before `git commit`; untracked or unstaged changes won't be included without explicit staging.

@@ -773,3 +773,241 @@ class TestAlwaysOnAutoPilot:
 
         # Normal messages should be returned unchanged
         assert result == normal_msg
+
+
+# ── Auto-pilot resume on incomplete work ─────────────────────────────
+
+class TestAutoPilotResume:
+    """When auto-pilot stops prematurely (cap, failure, duplicate), it should
+    save context so the user can type 'continue' to resume."""
+
+    def test_guard2_failure_flags_premature(self, base_dir, config):
+        """Guard 2 (failure with no progress) should return premature=True."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        result = orch._auto_pilot_decide(
+            user_input="build the auth system",
+            final_response="BASH FAILED (exit 1): npm test\nOUTPUT:\nError: Cannot find module",
+            iteration=0,
+        )
+        assert result["continue"] is False
+        assert result.get("premature") is True
+
+    def test_guard3_duplicate_flags_premature(self, base_dir, config):
+        """Guard 3 (duplicate detection) should return premature=True."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {
+                "continue": True,
+                "next_message": "Now implement the login page",
+            }
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Requirements are ready.",
+                iteration=1,
+                previous_messages=["Now implement the login page"],
+            )
+        assert result["continue"] is False
+        assert result.get("premature") is True
+
+    def test_haiku_complete_no_premature_flag(self, base_dir, config):
+        """When Haiku says 'stop, work is done', premature should NOT be set."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": False, "next_message": ""}
+            result = orch._auto_pilot_decide(
+                user_input="build auth",
+                final_response="All done. Tests pass. Auth system complete.",
+                iteration=1,
+            )
+        assert result["continue"] is False
+        assert result.get("premature") is not True  # None or False
+
+    def test_pending_autopilot_saved_on_cap(self, base_dir, config):
+        """When auto-pilot hits the iteration cap, _pending_autopilot should be set."""
+        from orchestrator import Orchestrator, MAX_AUTO_ITERATIONS
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Haiku always says continue — will hit the cap
+        call_count = 0
+        def vary_message(*a, **kw):
+            nonlocal call_count
+            call_count += 1
+            return {"continue": True, "next_message": f"Step {call_count}"}
+
+        # Mock process() for the nested calls so we don't trigger the full pipeline
+        def mock_process(msg):
+            orch.messages.append({"role": "assistant", "content": f"Done: {msg}"})
+
+        with patch.object(orch, "_auto_pilot_decide", side_effect=vary_message), \
+             patch.object(orch, "process", side_effect=mock_process):
+            orch._run_autopilot_loop("build a big app", "Requirements ready. Next: implement.")
+
+        assert orch._pending_autopilot is not None
+        assert orch._pending_autopilot["original_request"] == "build a big app"
+        assert orch._pending_autopilot["reason"] == "cap_reached"
+
+    def test_pending_autopilot_saved_on_failure(self, base_dir, config):
+        """When Guard 2 stops autopilot (failure, no progress), _pending_autopilot should be set."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # First iteration succeeds, second hits a failure with no progress
+        call_count = 0
+        def mock_decide(user_input, final_response, iteration=0, previous_messages=None):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return {"continue": True, "next_message": "Run the tests"}
+            # Second call: Guard 2 triggers (failure response, no progress markers)
+            return {"continue": False, "premature": True, "reason": "failure_no_progress"}
+
+        # Mock process() for the nested call so we don't trigger the full pipeline
+        def mock_process(msg):
+            orch.messages.append({"role": "assistant", "content": "BASH FAILED (exit 1): npm test"})
+
+        with patch.object(orch, "_auto_pilot_decide", side_effect=mock_decide), \
+             patch.object(orch, "process", side_effect=mock_process):
+            orch._run_autopilot_loop("build auth", "Code written. ACTIONS TAKEN:\nFILE WRITTEN: auth.py")
+
+        assert orch._pending_autopilot is not None
+        assert orch._pending_autopilot["reason"] == "failure_no_progress"
+
+    def test_pending_autopilot_cleared_on_complete(self, base_dir, config):
+        """When Haiku says work is complete, _pending_autopilot should be None."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": False, "next_message": ""}
+            orch._run_autopilot_loop("build auth", "All done. Tests pass.")
+
+        assert orch._pending_autopilot is None
+
+    def test_continue_resumes_autopilot(self, base_dir, config):
+        """Typing 'continue' with pending context should resume auto-pilot."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Set up pending autopilot context (simulating a previous premature stop)
+        orch._pending_autopilot = {
+            "original_request": "build the auth system",
+            "last_context": "Phase 1 done. Still need tests.",
+            "reason": "cap_reached",
+        }
+
+        # Mock the autopilot loop to verify it gets called with the right args
+        with patch.object(orch, "_run_autopilot_loop") as mock_loop:
+            orch.process("continue")
+
+        mock_loop.assert_called_once_with(
+            "build the auth system",
+            "Phase 1 done. Still need tests.",
+        )
+        # Pending should be cleared before the call
+        # (it will be re-set or cleared by the loop itself)
+
+    def test_continue_variants_all_work(self, base_dir, config):
+        """Various continue phrases should all resume auto-pilot."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        for phrase in ["continue", "/continue", "go", "keep going", "resume"]:
+            db = DBManager(base_dir / "db" / "conversations.db")
+            display = Display()
+            orch = Orchestrator("test", base_dir, db, display, config=config)
+            orch._pending_autopilot = {
+                "original_request": "build it",
+                "last_context": "Halfway done.",
+                "reason": "cap_reached",
+            }
+            with patch.object(orch, "_run_autopilot_loop") as mock_loop:
+                orch.process(phrase)
+            mock_loop.assert_called_once(), f"'{phrase}' should resume autopilot"
+
+    def test_continue_without_pending_routes_normally(self, base_dir, config):
+        """Typing 'continue' with no pending context should NOT trigger resume
+        and should fall through to normal routing."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # No pending autopilot
+        assert orch._pending_autopilot is None
+
+        # _run_autopilot_loop should NOT be called (no pending context)
+        # Normal routing should proceed instead
+        orch.is_new_project = False  # prevent scaffold from prompting
+        with patch.object(orch, "_run_autopilot_loop") as mock_loop, \
+             patch.object(orch, "_scaffold_project"), \
+             patch("orchestrator.call_claude_json") as mock_json, \
+             patch("orchestrator.call_claude") as mock_claude:
+            mock_json.return_value = {
+                "phases": [{"name": "General", "agents": ["pm"],
+                            "tasks": {"pm": "respond"}}]
+            }
+            mock_claude.return_value = "How can I help?"
+            orch.process("continue")
+        mock_loop.assert_not_called()
+
+    def test_interrupted_autopilot_no_pending(self, base_dir, config):
+        """Ctrl+C during autopilot should NOT save pending context."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # First call raises KeyboardInterrupt (user pressed Ctrl+C)
+        with patch("orchestrator.call_claude_json", side_effect=KeyboardInterrupt):
+            orch._run_autopilot_loop("build auth", "Code written.")
+
+        # User interrupted — don't nag them with "type continue"
+        assert orch._pending_autopilot is None

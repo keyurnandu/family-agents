@@ -301,6 +301,11 @@ class Orchestrator:
         self._turn_state: str = ""
         self._state_lock = threading.Lock()
 
+        # Pending auto-pilot context — saved when autopilot stops prematurely
+        # (cap reached, failure, duplicate loop) so user can type "continue" to resume.
+        # Set to None when work is complete or user interrupts.
+        self._pending_autopilot: dict | None = None
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -1233,6 +1238,119 @@ class Orchestrator:
         from difflib import SequenceMatcher
         return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
 
+    # Phrases that resume a paused auto-pilot (matched case-insensitively)
+    _CONTINUE_PHRASES = frozenset({
+        "continue", "/continue", "go", "go on", "keep going", "resume",
+    })
+
+    def _run_autopilot_loop(self, user_input: str, pilot_context: str) -> None:
+        """Run the auto-pilot continuation loop.
+
+        Capped at MAX_AUTO_ITERATIONS. Tracks WHY the loop stopped:
+        - "complete": Haiku decided all work is done → clears _pending_autopilot
+        - "cap_reached" / "failure_no_progress" / "duplicate_loop": premature stop
+          → saves _pending_autopilot so user can type 'continue' to resume
+        - "interrupted": user pressed Ctrl+C → does NOT save pending (respect the interrupt)
+        """
+        from utils.claude_client import get_session_stats
+
+        self._auto_pilot_active = True
+        iteration = 0
+        auto_previous_messages: list[str] = []
+        pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
+        _pilot_context = pilot_context
+        _stop_reason = "complete"
+
+        while iteration < MAX_AUTO_ITERATIONS:
+            try:
+                decision = self._auto_pilot_decide(
+                    user_input=user_input,
+                    final_response=_pilot_context,
+                    iteration=iteration,
+                    previous_messages=auto_previous_messages,
+                )
+            except KeyboardInterrupt:
+                console.print(
+                    "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
+                    "[dim]Returning to manual mode for this turn.[/dim]"
+                )
+                _stop_reason = "interrupted"
+                break
+
+            if not decision.get("continue", False):
+                if decision.get("premature"):
+                    _stop_reason = decision.get("reason", "premature")
+                else:
+                    if iteration > 0:
+                        console.print(
+                            "[dim]  ✓ Auto-pilot completed — no further steps needed.[/dim]"
+                        )
+                break
+
+            next_msg = decision.get("next_message", "").strip()
+            if not next_msg:
+                break
+
+            auto_previous_messages.append(next_msg)
+            iteration += 1
+
+            # Cost warning: show token burn so user can Ctrl+C early
+            current_tokens = get_session_stats().get("estimated_tokens", 0)
+            tokens_burned = current_tokens - pre_auto_tokens
+            cost_hint = f"  [dim]~{tokens_burned:,} tokens burned in auto-pilot[/dim]" if tokens_burned > 0 else ""
+
+            console.print(
+                f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
+                f"[dim]iteration {iteration}/{MAX_AUTO_ITERATIONS}[/dim]  "
+                f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
+                f"{cost_hint}"
+            )
+
+            # Re-process with the auto-generated message.
+            # _auto_pilot_active flag prevents the inner process() call
+            # from starting its own nested auto-pilot loop.
+            try:
+                self.process(next_msg)
+            except KeyboardInterrupt:
+                console.print(
+                    "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
+                    "[dim]Returning to manual mode.[/dim]"
+                )
+                _stop_reason = "interrupted"
+                break
+
+            # Update pilot context for next iteration's decision
+            if self.messages and self.messages[-1]["role"] == "assistant":
+                _pilot_context = self.messages[-1]["content"]
+                _pilot_context = self._augment_pilot_context_for_export(
+                    _pilot_context, user_input
+                )
+        else:
+            # while loop exhausted — iteration reached MAX_AUTO_ITERATIONS
+            _stop_reason = "cap_reached"
+
+        self._auto_pilot_active = False
+
+        if _stop_reason == "cap_reached":
+            console.print(
+                f"\n[yellow]⚠ Auto-pilot reached {MAX_AUTO_ITERATIONS} iterations — "
+                "pausing for your input.[/yellow]"
+            )
+
+        # Save or clear pending context based on stop reason
+        if _stop_reason not in ("complete", "interrupted"):
+            self._pending_autopilot = {
+                "original_request": user_input,
+                "last_context": _pilot_context,
+                "reason": _stop_reason,
+            }
+            console.print(
+                "[dim]  💡 Work may be incomplete. "
+                "Type [bold]continue[/bold] to resume auto-pilot.[/dim]"
+            )
+        else:
+            self._pending_autopilot = None
+
     # Failure markers that signal auto-pilot should stop (unless retried successfully)
     _FAILURE_MARKERS = ("BASH FAILED", "HEALTH_CHECK: FAILED")
 
@@ -1277,7 +1395,7 @@ class Orchestrator:
                     "[yellow]  ⚠ Auto-pilot stopping — "
                     "failure detected with no progress[/yellow]"
                 )
-                return _STOP
+                return {"continue": False, "next_message": "", "premature": True, "reason": "failure_no_progress"}
 
         state_context = self._turn_state[:600] if self._turn_state else ""
 
@@ -1341,7 +1459,7 @@ class Orchestrator:
                             "[yellow]  ⚠ Auto-pilot stopping — "
                             "repeated task detected (loop)[/yellow]"
                         )
-                        return _STOP
+                        return {"continue": False, "next_message": "", "premature": True, "reason": "duplicate_loop"}
 
         return result
 
@@ -1722,6 +1840,23 @@ class Orchestrator:
         )
         # Project state — load once, used by routing + synthesis
         self._turn_state = self._load_project_state()
+
+        # ── Resume paused auto-pilot ─────────────────────────────────────
+        # If auto-pilot was paused (cap, failure, duplicate) and the user
+        # types "continue" / "resume" / etc., pick up where we left off
+        # instead of routing through Aria.
+        if (user_input.strip().lower() in self._CONTINUE_PHRASES
+                and self._pending_autopilot
+                and not getattr(self, "_auto_pilot_active", False)):
+            pending = self._pending_autopilot
+            self._pending_autopilot = None  # cleared; loop will re-set if needed
+            console.print(
+                "\n[bold bright_cyan]🤖 Auto-pilot resuming[/bold bright_cyan]  "
+                f"[dim]original: {pending['original_request'][:80]}"
+                f"{'…' if len(pending['original_request']) > 80 else ''}[/dim]"
+            )
+            self._run_autopilot_loop(pending["original_request"], pending["last_context"])
+            return
 
         # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
         # _try_serve_file_directly also writes to db/messages, so return immediately.
@@ -2146,86 +2281,10 @@ class Orchestrator:
         _actionable = self._has_actionable_work(agent_responses, phases)
         if _actionable and agent_responses and self.project_name != "_general" \
                 and not getattr(self, "_auto_pilot_active", False):
-            from utils.claude_client import get_session_stats
-            self._auto_pilot_active = True
-            iteration = 0
-            auto_previous_messages: list[str] = []
-            pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
-            # Build context for auto-pilot — falls back to raw agent responses
-            # when synthesis was skipped (single-agent turns)
             _pilot_context = self._build_auto_pilot_context(
                 final_response, agent_responses
             )
-
-            while iteration < MAX_AUTO_ITERATIONS:
-                try:
-                    decision = self._auto_pilot_decide(
-                        user_input=user_input,
-                        final_response=_pilot_context,
-                        iteration=iteration,
-                        previous_messages=auto_previous_messages,
-                    )
-                except KeyboardInterrupt:
-                    console.print(
-                        "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
-                        "[dim]Returning to manual mode for this turn.[/dim]"
-                    )
-                    break
-
-                if not decision.get("continue", False):
-                    if iteration > 0:
-                        console.print(
-                            "[dim]  ✓ Auto-pilot completed — no further steps needed.[/dim]"
-                        )
-                    break
-
-                next_msg = decision.get("next_message", "").strip()
-                if not next_msg:
-                    break
-
-                auto_previous_messages.append(next_msg)
-                iteration += 1
-
-                # Cost warning: show token burn so user can Ctrl+C early
-                current_tokens = get_session_stats().get("estimated_tokens", 0)
-                tokens_burned = current_tokens - pre_auto_tokens
-                cost_hint = f"  [dim]~{tokens_burned:,} tokens burned in auto-pilot[/dim]" if tokens_burned > 0 else ""
-
-                console.print(
-                    f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
-                    f"[dim]iteration {iteration}/{MAX_AUTO_ITERATIONS}[/dim]  "
-                    f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
-                    f"{cost_hint}"
-                )
-
-                # Re-process with the auto-generated message.
-                # _auto_pilot_active flag prevents the inner process() call
-                # from starting its own nested auto-pilot loop.
-                try:
-                    self.process(next_msg)
-                except KeyboardInterrupt:
-                    console.print(
-                        "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
-                        "[dim]Returning to manual mode.[/dim]"
-                    )
-                    break
-
-                # Update pilot context for next iteration's decision
-                if self.messages and self.messages[-1]["role"] == "assistant":
-                    _pilot_context = self.messages[-1]["content"]
-                    # If the last iteration was a doc export, augment context
-                    # so Haiku doesn't stall on the terse export message
-                    _pilot_context = self._augment_pilot_context_for_export(
-                        _pilot_context, user_input
-                    )
-
-            self._auto_pilot_active = False
-
-            if iteration >= MAX_AUTO_ITERATIONS:
-                console.print(
-                    f"\n[yellow]⚠ Auto-pilot reached {MAX_AUTO_ITERATIONS} iterations — "
-                    "pausing for your input.[/yellow]"
-                )
+            self._run_autopilot_loop(user_input, _pilot_context)
 
     # ------------------------------------------------------------------
     # Direct @mention: bypass routing, talk to one agent directly

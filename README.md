@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-159 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+169 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -309,9 +309,14 @@ You (sonnet): build the auth system with JWT
 🤖 Auto-pilot  iteration 3/5  Implement the registration flow…
 
 ⚠ Auto-pilot reached 5 iterations — pausing for your input.
+  💡 Work may be incomplete. Type continue to resume auto-pilot.
+
+You: continue
+🤖 Auto-pilot resuming  original: build the auth system with JWT
+🤖 Auto-pilot  iteration 1/5  Add rate limiting to login endpoint…
 ```
 
-Press **Ctrl+C** at any time to interrupt the auto-pilot loop.
+Press **Ctrl+C** at any time to interrupt the auto-pilot loop. Type **continue**, **resume**, or **go** to pick up where it left off.
 
 ### Safety guards
 
@@ -322,6 +327,7 @@ Auto-pilot has three built-in guards that prevent getting stuck:
 | **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
 | **Hard cap** | After 5 iterations, always pauses for your input regardless of what Aria decides |
+| **Resume on incomplete** | When auto-pilot stops prematurely (cap, failure, or duplicate loop), it saves context and prompts you to type `continue` to resume where it left off |
 
 ---
 
@@ -755,7 +761,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 159 tests — all TDD, run with `pytest`
+├── tests/                    # 169 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching

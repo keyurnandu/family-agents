@@ -211,3 +211,45 @@ Before running OpenAPI contract test suites, verify the spec file exists and is 
 
 ### [2026-05-23 04:56] via lesson
 Always quote file paths containing spaces in bash commands — the parent directory "OneDrive - Adobe" requires quoting: `dir "tests\test_openapi*"` instead of `dir tests\test_openapi*`.
+
+### [2026-05-23 05:23] via lesson
+Always use complete pytest traceback flags (e.g., `--tb=short` not `--tb=`) — 25 simultaneous test errors indicate a systemic setup issue that the truncated output is hiding.
+
+### [2026-05-23 05:28] via lesson
+Always check OpenAPI spec file existence and conftest.py configuration when pytest shows ERROR status across all tests—this indicates missing/misconfigured files or fixtures, not individual test failures.
+
+### [2026-05-23 05:48] via lesson
+Before running OpenAPI contract tests, verify the spec includes TriggerRunResponse, RunStatusResponse, and RunSummary with the runner field defined.
+
+### [2026-05-23 05:51] via lesson
+Before running pytest on a full test suite, use `python -m pytest --collect-only` to identify collection errors early instead of debugging ERRORs after test execution. This distinguishes setup/import failures from actual test failures and prevents wasted time on invalid test runs.
+
+### [2026-05-23 05:55] via lesson
+Always add the `runner_used` field to TriggerRunResponse, RunStatusResponse, and RunSummaryPublic schema definitions before committing changes to response models. Run `pytest tests/test_sc4_enum_coercion.py -v` to validate schema completeness after model changes.
+
+### [2026-05-23 08:20] via lesson
+Never use backslash path separators in bash commands; always use forward slashes for paths, even on Windows (e.g., `venv/Scripts/python.exe` instead of `venv\Scripts\python.exe`).
+
+### [2026-05-23 08:26] via lesson
+Before executing pytest, validate the command has no trailing incomplete flags (this command ended with `-v -`).
+
+### [2026-05-23 08:27] via lesson
+Before running pytest commands, validate that all flags are complete — the trailing `-v -` has an incomplete flag that will cause exit 1 failures.
+
+### [2026-05-23 08:32] via lesson
+Always validate pytest command syntax before execution—the trailing `-` in `pytest tests/test_sc3_openapi_runner_contract.py -v -` indicates an incomplete or malformed flag that will cause the command to fail.
+
+### [2026-05-23 08:33] via lesson
+Before executing pytest commands, validate the syntax—the trailing `-` in `-v -` is incomplete and causes failures.
+
+### [2026-05-23 08:42] via lesson
+Never pipe to `tee` on Windows without WSL or Git Bash; use `tee.exe` from Git Bash or PowerShell's `Tee-Object` cmdlet instead.
+
+### [2026-05-23 08:59] via lesson
+Always use `grep` instead of `findstr` for file searching in Bash; `findstr` is Windows-only and doesn't exist on Unix/Linux systems.
+
+### [2026-05-23 09:01] via lesson
+Always use `grep` or the Bash tool's Grep function instead of `findstr` for cross-platform file searching, or check the OS before using Windows-specific commands.
+
+### [2026-05-23 09:02] via lesson
+Never run `grep` directly in bash commands; use the Grep tool instead for content search across files.
