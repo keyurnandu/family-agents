@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-84 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization) without requiring an LLM connection.
+103 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-mode, destructive command detection) without requiring an LLM connection.
 
 ---
 
@@ -168,6 +168,7 @@ Paste mode opened — paste your content below, then type /end to send.
 | `/project` | Show project stats (messages, memory items, model) |
 | `/status` | Project snapshot — memory, files, token usage, docs |
 | `/export <type>` | Generate a doc (requirements, architecture, sprint-plan…) |
+| `/auto on\|off\|status` | Auto-approve file writes + safe bash · Aria auto-pilots between phases (max 5 iterations) |
 | `/tdd on\|off\|status` | Toggle TDD mode — Casey writes tests first, Sam implements, health check runs after every write |
 | `/tdd health <cmd>` | Set the health check command (e.g. `python -c "from app.main import app"`) |
 | `/switch [name\|number]` | Switch to another project — case-insensitive, shows picker if no arg |
@@ -273,6 +274,42 @@ You (sonnet): implement the login epic from the requirements
 ```
 
 The token bar turns yellow at 50% and red at 80% — a signal to consider `/clear` before the context window fills up.
+
+---
+
+## Auto Mode (`/auto`)
+
+Reduce approval friction by auto-approving safe actions and letting Aria auto-pilot between phases.
+
+```
+/auto on      # enable auto-approve + auto-pilot
+/auto off     # disable — all actions require manual approval
+/auto status  # show current setting
+```
+
+### What gets auto-approved
+
+| Action | Auto Mode | Normal Mode |
+|---|---|---|
+| File writes (EXEC:file) | ⚡ Auto-approved | Prompt (d/y/N) |
+| Safe bash (npm install, pytest, etc.) | ⚡ Auto-approved | Prompt (Allow?) |
+| **Destructive bash** (rm -rf, DROP TABLE, git push --force, etc.) | **Always prompts** | Prompt (Allow?) |
+
+### Auto-pilot continuation
+
+When auto mode is on, Aria decides the next logical step after each phase instead of asking "What would you like to do next?". The loop continues automatically for up to 5 iterations — then pauses for your input.
+
+```
+You (sonnet): build the auth system with JWT
+
+🤖 Auto-pilot  iteration 1/5  Now implement the login endpoint…
+🤖 Auto-pilot  iteration 2/5  Write tests for the auth middleware…
+🤖 Auto-pilot  iteration 3/5  Implement the registration flow…
+
+⚠ Auto-pilot reached 5 iterations — pausing for your input.
+```
+
+Press **Ctrl+C** at any time to interrupt the auto-pilot loop.
 
 ---
 

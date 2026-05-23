@@ -1,0 +1,220 @@
+"""Tests for /auto mode — auto-approve + auto-pilot continuation."""
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+
+# ── memory_manager: persist auto mode ────────────────────────────────
+
+class TestAutoModePersistence:
+    def test_save_and_load_auto_mode(self, base_dir):
+        """Auto mode flag should persist across MemoryManager instances."""
+        from utils.memory_manager import MemoryManager
+
+        mm = MemoryManager(base_dir, "test-project")
+        assert mm.load_auto_mode() is False  # default off
+
+        mm.save_auto_mode(True)
+        assert mm.load_auto_mode() is True
+
+        # New instance reads from disk
+        mm2 = MemoryManager(base_dir, "test-project")
+        assert mm2.load_auto_mode() is True
+
+    def test_auto_mode_off(self, base_dir):
+        """Turning auto mode off should persist."""
+        from utils.memory_manager import MemoryManager
+
+        mm = MemoryManager(base_dir, "test-project")
+        mm.save_auto_mode(True)
+        mm.save_auto_mode(False)
+        assert mm.load_auto_mode() is False
+
+    def test_auto_mode_missing_file_returns_false(self, base_dir):
+        """When no auto.txt exists, load_auto_mode should return False."""
+        from utils.memory_manager import MemoryManager
+
+        mm = MemoryManager(base_dir, "test-project")
+        assert mm.load_auto_mode() is False
+
+
+# ── action_executor: destructive bash detection ──────────────────────
+
+class TestDestructiveBashDetection:
+    def test_rm_rf_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("rm -rf /some/dir") is True
+
+    def test_drop_table_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("psql -c 'DROP TABLE users'") is True
+
+    def test_git_push_force_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("git push --force origin main") is True
+
+    def test_git_reset_hard_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("git reset --hard HEAD~3") is True
+
+    def test_format_disk_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("format C:") is True
+
+    def test_safe_commands_not_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("npm install") is False
+        assert is_destructive_bash("python -m pytest tests/ -v") is False
+        assert is_destructive_bash("pip install -r requirements.txt") is False
+        assert is_destructive_bash("git add .") is False
+        assert is_destructive_bash("git commit -m 'test'") is False
+
+    def test_del_star_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("del /s /q *.py") is True
+
+    def test_sudo_rm_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("sudo rm -rf /var/log") is True
+
+    def test_truncate_table_is_destructive(self):
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("mysql -e 'TRUNCATE TABLE orders'") is True
+
+
+# ── action_executor: auto-approve behaviour ──────────────────────────
+
+class TestAutoApproveMode:
+    def test_file_writes_auto_approved_in_auto_mode(self, tmp_path):
+        """In auto mode, file writes should proceed without prompting."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        actions = [
+            Action(kind="file", label="src/app.py", content="print('hello')", agent_name="Sam"),
+        ]
+        with patch("utils.action_executor.console"):
+            outcomes = prompt_and_execute(actions, tmp_path, auto_mode=True)
+
+        assert any("FILE WRITTEN" in o for o in outcomes)
+        assert (tmp_path / "src" / "app.py").read_text() == "print('hello')"
+
+    def test_safe_bash_auto_approved_in_auto_mode(self, tmp_path):
+        """Safe bash commands should auto-approve in auto mode."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        actions = [
+            Action(kind="bash", label="echo hello", content="echo hello", agent_name="Sam"),
+        ]
+        with patch("utils.action_executor.console"), \
+             patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0, stdout="hello\n", stderr=""
+            )
+            outcomes = prompt_and_execute(actions, tmp_path, auto_mode=True)
+
+        assert any("BASH OK" in o for o in outcomes)
+
+    def test_destructive_bash_still_prompts_in_auto_mode(self, tmp_path):
+        """Destructive bash commands must ALWAYS prompt, even in auto mode."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        actions = [
+            Action(kind="bash", label="rm -rf /", content="rm -rf /", agent_name="Sam"),
+        ]
+        with patch("utils.action_executor.console"), \
+             patch("utils.action_executor.Confirm") as mock_confirm:
+            mock_confirm.ask.return_value = False
+            outcomes = prompt_and_execute(actions, tmp_path, auto_mode=True)
+
+        assert any("BASH SKIPPED" in o for o in outcomes)
+        # Confirm.ask should have been called for the destructive command
+        mock_confirm.ask.assert_called()
+
+    def test_non_auto_mode_still_prompts_for_files(self, tmp_path):
+        """Without auto mode, file writes should still require user prompt."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        actions = [
+            Action(kind="file", label="test.py", content="pass", agent_name="Sam"),
+        ]
+        with patch("utils.action_executor.console") as mock_console:
+            mock_console.input.return_value = "n"
+            outcomes = prompt_and_execute(actions, tmp_path, auto_mode=False)
+
+        assert any("FILE SKIPPED" in o for o in outcomes)
+
+
+# ── orchestrator: auto-pilot continuation ────────────────────────────
+
+class TestAutoPilotDecision:
+    def test_auto_pilot_returns_continue_or_done(self, base_dir, config):
+        """_auto_pilot_decide should return a dict with 'continue' bool."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {
+                "continue": True,
+                "next_message": "Now implement the login page",
+            }
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Requirements are ready. Next: implement login.",
+            )
+
+        assert "continue" in result
+        assert isinstance(result["continue"], bool)
+
+    def test_auto_pilot_caps_iterations(self, base_dir, config):
+        """Auto-pilot should stop after MAX_AUTO_ITERATIONS."""
+        from orchestrator import Orchestrator, MAX_AUTO_ITERATIONS
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Simulate already at max iterations
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "keep going"}
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Done phase 1",
+                iteration=MAX_AUTO_ITERATIONS,
+            )
+        # Should force-stop regardless of what haiku says
+        assert result["continue"] is False
+
+    def test_synthesis_suppresses_next_steps_in_auto(self, base_dir, config):
+        """In auto mode, synthesis prompt should tell Aria NOT to list options."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+        orch._turn_auto = True
+
+        prompt = orch._synthesis_prompt(
+            "build the auth system",
+            {"developer": "I'll implement the login page."},
+        )
+        # In auto mode, the prompt should instruct Aria NOT to ask next steps
+        assert "Auto-pilot is active" in prompt
+        # The "Always close your response with" instruction should NOT appear
+        assert "Always close your response with" not in prompt

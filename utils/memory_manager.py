@@ -298,6 +298,22 @@ class MemoryManager:
         return len(list(role_dir.glob("*.md")))
 
     # ------------------------------------------------------------------
+    # Auto mode — auto-approve file writes + safe bash, persists per project
+    # ------------------------------------------------------------------
+
+    def save_auto_mode(self, enabled: bool) -> None:
+        """Persist auto-approve mode flag."""
+        auto_file = self.dynamic_dir / "auto.txt"
+        auto_file.write_text(str(int(enabled)), encoding="utf-8")
+
+    def load_auto_mode(self) -> bool:
+        """Return whether auto-approve mode is enabled. Defaults to False."""
+        auto_file = self.dynamic_dir / "auto.txt"
+        if not auto_file.exists():
+            return False
+        return auto_file.read_text(encoding="utf-8").strip() == "1"
+
+    # ------------------------------------------------------------------
     # TDD mode — persists across sessions per project
     # ------------------------------------------------------------------
 

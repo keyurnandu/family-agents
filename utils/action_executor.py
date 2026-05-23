@@ -35,6 +35,29 @@ from rich.text import Text
 
 console = Console()
 
+# ── Destructive command detection ──────────────────────────────────────
+# Commands that can cause irreversible data loss. In /auto mode, these
+# are the ONLY bash commands that still require manual confirmation.
+_DESTRUCTIVE_PATTERNS = [
+    re.compile(r"\brm\s+.*-\w*[rf]", re.IGNORECASE),           # rm -rf, rm -r, rm -f
+    re.compile(r"\bsudo\s+rm\b", re.IGNORECASE),                # sudo rm anything
+    re.compile(r"\bdel\s+/", re.IGNORECASE),                    # Windows del /s /q
+    re.compile(r"\brmdir\s+/s", re.IGNORECASE),                 # Windows rmdir /s
+    re.compile(r"\bgit\s+push\s+.*--force", re.IGNORECASE),     # git push --force
+    re.compile(r"\bgit\s+reset\s+--hard", re.IGNORECASE),       # git reset --hard
+    re.compile(r"\bgit\s+clean\s+.*-[df]", re.IGNORECASE),      # git clean -fd
+    re.compile(r"\bdrop\s+(?:table|database)\b", re.IGNORECASE), # DROP TABLE/DATABASE
+    re.compile(r"\btruncate\s+table\b", re.IGNORECASE),         # TRUNCATE TABLE
+    re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE),         # format C:
+    re.compile(r"\bmkfs\b", re.IGNORECASE),                     # mkfs (format disk on Linux)
+    re.compile(r"\bdd\s+if=", re.IGNORECASE),                   # dd (disk destroy)
+]
+
+
+def is_destructive_bash(cmd: str) -> bool:
+    """Return True if the bash command matches any destructive pattern."""
+    return any(p.search(cmd) for p in _DESTRUCTIVE_PATTERNS)
+
 
 def normalize_bash_command(
     cmd: str,
@@ -204,11 +227,16 @@ def prompt_and_execute(
     tdd_health_cmd: str | None = None,
     tdd_cwd: Path | None = None,
     normalize_dirs: list[Path] | None = None,
+    auto_mode: bool = False,
 ) -> list[str]:
     """
     File changes: show a compact summary with diff stats, one 'apply all?' prompt.
     If the user types 'd' at the prompt, the full diff is shown before re-asking.
     Bash commands: confirmed individually (higher risk).
+
+    auto_mode: when True, file writes and safe bash commands are auto-approved.
+    Destructive bash commands (rm -rf, DROP TABLE, etc.) always require confirmation.
+
     Returns outcome strings fed back to the agent pipeline.
     """
     if not actions:
@@ -277,29 +305,35 @@ def prompt_and_execute(
             table.add_row(icon, a.label, stats, preview)
 
         console.print(table)
-        console.print("[dim]  d = show diff · y = apply · N = skip[/dim]")
 
-        while True:
-            raw = console.input(
-                f"\n  Apply {'all ' if n > 1 else ''}{'change' if n == 1 else 'changes'}? [d/y/N] "
-            ).strip().lower()
-            if raw == "d":
-                # Show diffs for all changed (non-new) files
-                console.print()
-                for a in file_actions:
-                    state = file_states[a.label]
-                    if state["is_new"]:
-                        suffix = Path(a.label).suffix.lstrip(".") or "text"
-                        console.print(f"\n[bold green]✨ NEW[/bold green]  [cyan]{a.label}[/cyan]")
-                        console.print(Syntax(a.content[:3000], suffix, theme="monokai", line_numbers=True))
-                    else:
-                        console.print(f"\n[bold yellow]✏  DIFF[/bold yellow]  [cyan]{a.label}[/cyan]")
-                        _show_diff(state["old_content"], a.content, a.label)
-                console.print()
-                console.print("[dim]  d = show diff again · y = apply · N = skip[/dim]")
-                continue
-            approved = raw in ("y", "yes")
-            break
+        if auto_mode:
+            # Auto-approve: skip the interactive prompt
+            console.print("[dim green]  ⚡ Auto-approved (auto mode)[/dim green]")
+            approved = True
+        else:
+            console.print("[dim]  d = show diff · y = apply · N = skip[/dim]")
+
+            while True:
+                raw = console.input(
+                    f"\n  Apply {'all ' if n > 1 else ''}{'change' if n == 1 else 'changes'}? [d/y/N] "
+                ).strip().lower()
+                if raw == "d":
+                    # Show diffs for all changed (non-new) files
+                    console.print()
+                    for a in file_actions:
+                        state = file_states[a.label]
+                        if state["is_new"]:
+                            suffix = Path(a.label).suffix.lstrip(".") or "text"
+                            console.print(f"\n[bold green]✨ NEW[/bold green]  [cyan]{a.label}[/cyan]")
+                            console.print(Syntax(a.content[:3000], suffix, theme="monokai", line_numbers=True))
+                        else:
+                            console.print(f"\n[bold yellow]✏  DIFF[/bold yellow]  [cyan]{a.label}[/cyan]")
+                            _show_diff(state["old_content"], a.content, a.label)
+                    console.print()
+                    console.print("[dim]  d = show diff again · y = apply · N = skip[/dim]")
+                    continue
+                approved = raw in ("y", "yes")
+                break
 
         if approved:
             console.print()
@@ -346,7 +380,17 @@ def prompt_and_execute(
         console.print()
         console.print(f"[bold yellow]{action.agent_name}[/bold yellow] wants to run:")
         _show_bash_action(action)
-        approved = Confirm.ask("  Allow?", default=False)
+
+        if auto_mode and not is_destructive_bash(action.content):
+            # Auto-approve safe bash commands
+            console.print("[dim green]  ⚡ Auto-approved (auto mode)[/dim green]")
+            approved = True
+        elif auto_mode and is_destructive_bash(action.content):
+            # Destructive commands ALWAYS require manual confirmation
+            console.print("[bold yellow]  ⚠ Destructive command detected — manual approval required[/bold yellow]")
+            approved = Confirm.ask("  Allow?", default=False)
+        else:
+            approved = Confirm.ask("  Allow?", default=False)
 
         if approved:
             console.print("  [dim]Running…[/dim]\n")

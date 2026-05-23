@@ -126,6 +126,7 @@ class Display:
                     memory_entries: list, category_counts: dict,
                     total_skills: int, session_stats: dict,
                     tdd_enabled: bool = False, tdd_health_cmd: str = "",
+                    auto_enabled: bool = False,
                     safe_context: int = 200_000,
                     project_state: str = ""):
         from rich.panel import Panel
@@ -161,10 +162,12 @@ class Display:
             + (f"  [dim]health: {tdd_health_cmd[:60]}[/dim]" if tdd_health_cmd else "  [dim]no health check[/dim]")
             if tdd_enabled else "[dim]OFF[/dim]"
         )
+        auto_line = "[bold green]ON[/bold green]  [dim]file + safe bash auto-approved · auto-pilot active[/dim]" if auto_enabled else "[dim]OFF[/dim]"
         lines = [
             f"[bold]Project:[/bold]  {project_name}",
             f"[bold]Messages:[/bold] {msg_count}  ·  Last active: [dim]{last_active}[/dim]",
             f"[bold]Team:[/bold]     {' · '.join(active_roster)}  [dim](model: {model})[/dim]",
+            f"[bold]Auto:[/bold]     {auto_line}",
             f"[bold]TDD:[/bold]      {tdd_line}",
             f"[bold]Skills:[/bold]   {total_skills} total across team",
             "",
@@ -302,6 +305,7 @@ class Display:
             "  [cyan]/skill add <role>[/cyan]    Teach an agent a new skill\n"
             "  [cyan]/skill remove <role> <n>[/cyan] Remove a skill\n"
             "  [cyan]/export <type>[/cyan]     Generate a doc (requirements, architecture, sprint-plan…)\n"
+            "  [cyan]/auto on|off|status[/cyan] Auto-approve files + safe bash, auto-pilot between phases\n"
             "  [cyan]/tdd on|off|status[/cyan] Enable TDD mode — Casey writes tests first, Sam implements\n"
             "  [cyan]/tdd health <cmd>[/cyan]  Set the health check command run after every file write\n"
             "  [cyan]/retrospective[/cyan]     Each agent reflects on the session and saves a lesson to their skills\n"

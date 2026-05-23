@@ -19,6 +19,7 @@ flowchart TD
         CMD -->|/paste · """| PASTE[Paste mode\naccumulate multi-line\nthen /end to send]
         CMD -->|/skill add/list/remove| SKILLS_CMD[Skill management]
         CMD -->|/export type| EXPORT[Export doc\nrequirements · architecture\nsprint-plan · api-docs]
+        CMD -->|/auto on/off| AUTO_CMD[Auto mode config\nauto-approve + auto-pilot]
         CMD -->|/tdd on/off/health| TDD_CMD[TDD mode config]
         CMD -->|/load path| CODEBASE[Load codebase\ninto context]
         CMD -->|/model alias| MODEL_SW[Switch model\nhaiku · sonnet · opus]
@@ -55,6 +56,12 @@ flowchart TD
         PH -->|all phases done| SYNTH[6 · Synthesis\n_trim_for_synthesis\nstrips EXEC + condenses OUTPUT\nper-agent cap 1600 chars\nAria writes final summary]
 
         SYNTH --> DISP[Display to user\n+ token bar\n% of safe_context_tokens\ndefault 200k]
+
+        DISP --> AUTO_CHK{Auto mode?\n_turn_auto}
+        AUTO_CHK -->|yes| APILOT[_auto_pilot_decide\nHaiku JSON call\ncontinue? next_message?]
+        APILOT -->|continue + next_msg| PROCESS
+        APILOT -->|done or max 5| STOP((🛑))
+        AUTO_CHK -->|no| STOP
     end
 
     %% ─────────────────────────────────────────────
@@ -190,7 +197,7 @@ flowchart TD
 | **No SDK / API key** | All LLM calls go through `claude --print` subprocess; prompt via stdin (bypasses 32k Windows cmd limit) |
 | **Parallel execution** | Agents within a phase run in `ThreadPoolExecutor`; phases are sequential so dev always has requirements first |
 | **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash` — rebuilds only when something actually changes; capped at 20 entries with LRU eviction |
-| **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd`, `_turn_state` loaded once at the start of `process()` — not re-loaded for every agent call |
+| **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd`, `_turn_auto`, `_turn_state` loaded once at the start of `process()` — not re-loaded for every agent call |
 | **Role-filtered memory** | PM/BSA see requirements+decisions; Dev/Lead see technical+decisions — no agent reads irrelevant categories |
 | **Bash output capture** | `capture_output=True` → printed to terminal AND injected into outcomes so agents can reason about test results |
 | **Lesson immediacy** | `_apply_lesson` does three things atomically: persist to disk, evict prompt cache, inject into `self.messages` — active in the next response |
@@ -215,4 +222,6 @@ flowchart TD
 | **Export doc update-in-place** | `export_doc()` globs `docs/{type}*.md` before generating — if found, the existing doc's full content is injected into the prompt with "update and enhance" instructions; the file is overwritten in place instead of creating a dated duplicate |
 | **Export anti-truncation** | Export prompt explicitly overrides brevity rules: "Write the COMPLETE, full-length document — ignore any brevity rules. Output the entire document with no truncation." Summary extraction raised from 5000→10000 chars |
 | **Export docs in loaded codebase** | When a codebase is `/load`ed, `export_doc()` writes to `loaded_path/docs/` (not `projects/<name>/docs/`), file list reflects the loaded codebase, and `load_project_docs()` checks both locations (deduped by filename, loaded path takes priority) |
-| **Test suite** | 84 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
+| **Auto mode** | `/auto on` auto-approves file writes + safe bash (no interactive prompt); destructive commands (`rm -rf`, `DROP TABLE`, `git push --force`, etc.) matched via `_DESTRUCTIVE_PATTERNS` regex list always require manual confirmation |
+| **Auto-pilot loop** | After synthesis, `_auto_pilot_decide()` asks Haiku if a concrete next step exists — if yes, `process()` is re-invoked with the auto-generated message; capped at `MAX_AUTO_ITERATIONS=5`; `_turn_auto` temporarily set to False during recursion to prevent nested loops; Ctrl+C breaks out cleanly |
+| **Test suite** | 103 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |

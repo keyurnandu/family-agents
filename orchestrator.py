@@ -18,6 +18,9 @@ from utils.memory_manager import MemoryManager
 
 console = Console()
 
+# Safety cap for auto-pilot continuation loop — prevents runaway iterations
+MAX_AUTO_ITERATIONS = 5
+
 ROLE_DESCRIPTIONS = {
     "pm": "Project planning, timelines, stakeholder management, scope",
     "bsa": "Requirements, user stories, process mapping, acceptance criteria",
@@ -271,6 +274,7 @@ class Orchestrator:
         self._turn_docs: str = ""
         self._turn_memory: str = ""
         self._turn_tdd: tuple[bool, str] = (False, "")
+        self._turn_auto: bool = False
 
         # Routing prompt cache — keyed by (roster, mem_count, tdd_state, state_mtime).
         # Rebuilt only when something actually changes, not on every message.
@@ -670,19 +674,29 @@ class Orchestrator:
                 f"{self._turn_state[:600]}"
             )
 
-        parts.append(
+        synth_instruction = (
             "\nAs Aria, the coordinator, synthesize these into a clear, unified response "
             "for the customer. Be concise. Credit team members where relevant. "
             "If agents have file changes queued, tell the customer they will be prompted to approve them. "
             "If there are open questions for the customer, group them at the end."
             + state_hint
-            + "\n\nIMPORTANT: Always close your response with a brief **What would you like to do next?** "
-            "section offering 2–3 concrete options that directly follow from the project state above "
-            "(e.g. if auth is complete and tests are missing → suggest writing tests; "
-            "if implementation is done → suggest deployment or review). "
-            "Keep each option to one short line. Be specific — reference actual components or files "
-            "from the project, not generic phrases like 'continue development'."
         )
+        if self._turn_auto:
+            synth_instruction += (
+                "\n\nAuto-pilot is active. End with a concise status summary — "
+                "do NOT ask 'What would you like to do next?' or list options. "
+                "The system will automatically decide the next step."
+            )
+        else:
+            synth_instruction += (
+                "\n\nIMPORTANT: Always close your response with a brief **What would you like to do next?** "
+                "section offering 2–3 concrete options that directly follow from the project state above "
+                "(e.g. if auth is complete and tests are missing → suggest writing tests; "
+                "if implementation is done → suggest deployment or review). "
+                "Keep each option to one short line. Be specific — reference actual components or files "
+                "from the project, not generic phrases like 'continue development'."
+            )
+        parts.append(synth_instruction)
         return "\n".join(parts)
 
     # ------------------------------------------------------------------
@@ -1054,7 +1068,7 @@ class Orchestrator:
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
                 write_dir = self.loaded_path if self.loaded_path else project_dir
-                prompt_and_execute(actions, write_dir, normalize_dirs=self._extra_normalize_dirs(project_dir))
+                prompt_and_execute(actions, write_dir, normalize_dirs=self._extra_normalize_dirs(project_dir), auto_mode=self._turn_auto)
 
             self.memory.extract_and_save_memories(response, role)
 
@@ -1153,6 +1167,59 @@ class Orchestrator:
         threading.Thread(target=_update, daemon=True).start()
 
     # ------------------------------------------------------------------
+    # Auto-pilot — decide whether to continue without user input
+    # ------------------------------------------------------------------
+
+    def _auto_pilot_decide(
+        self, user_input: str, final_response: str, iteration: int = 0
+    ) -> dict:
+        """
+        Ask Haiku whether there is a clear, actionable next step that should
+        proceed automatically. Returns {"continue": bool, "next_message": str}.
+
+        Safety: always returns continue=False when iteration >= MAX_AUTO_ITERATIONS.
+        """
+        if iteration >= MAX_AUTO_ITERATIONS:
+            return {"continue": False, "next_message": ""}
+
+        state_context = self._turn_state[:600] if self._turn_state else ""
+
+        try:
+            result = call_claude_json(
+                prompt=(
+                    f"Original customer request: {user_input}\n\n"
+                    f"Latest team output:\n{final_response[:1500]}\n\n"
+                    + (f"Project state:\n{state_context}\n\n" if state_context else "")
+                    + f"Iteration {iteration + 1} of {MAX_AUTO_ITERATIONS}.\n\n"
+                    "Is there a clear, concrete next step the team should do RIGHT NOW "
+                    "to fulfil the original request? Only continue if there is actual "
+                    "implementation or testing work remaining. Stop if the work is complete, "
+                    "if user input is needed, or if the next step is vague.\n\n"
+                    "Return JSON: {continue: bool, next_message: string}"
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "continue": {"type": "boolean"},
+                        "next_message": {
+                            "type": "string",
+                            "description": "The concrete message to send as the next user input, e.g. 'Now implement the login page with JWT auth'",
+                        },
+                    },
+                    "required": ["continue"],
+                },
+                system_prompt=(
+                    "You decide whether an auto-pilot dev team should continue to the next step "
+                    "or pause for user input. Be conservative — only continue when the next step "
+                    "is obvious and concrete. Default to stopping."
+                ),
+                model="haiku",
+            )
+            return result
+        except Exception:
+            return {"continue": False, "next_message": ""}
+
+    # ------------------------------------------------------------------
     # Auto-retry after lesson — agent fixes its own failure immediately
     # ------------------------------------------------------------------
 
@@ -1226,6 +1293,7 @@ class Orchestrator:
                 tdd_health_cmd=tdd_health_cmd,
                 tdd_cwd=tdd_cwd,
                 normalize_dirs=normalize_dirs,
+                auto_mode=self._turn_auto,
             )
         elif not retry_actions:
             # Agent gave a text-only response — still useful, treat as an outcome note
@@ -1518,6 +1586,7 @@ class Orchestrator:
         #    routing / agent / synthesis calls in this turn) ────────────────
         cfg = self.config
         self._turn_tdd = self.memory.load_tdd_mode()
+        self._turn_auto = self.memory.load_auto_mode()
         self._turn_memory = self.memory.load_project_memory(
             limit=cfg.get("max_routing_memory", 8)
         )
@@ -1782,6 +1851,7 @@ class Orchestrator:
                         tdd_health_cmd=_tdd_health_cmd if _tdd_enabled else None,
                         tdd_cwd=_tdd_cwd,
                         normalize_dirs=_norm_dirs,
+                        auto_mode=self._turn_auto,
                     )
                     if outcomes:
                         phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
@@ -1926,6 +1996,66 @@ class Orchestrator:
 
         console.print()
 
+        # ── Auto-pilot continuation loop ─────────────────────────────────
+        # When /auto is on, Aria decides whether to continue to the next
+        # logical step without waiting for user input. Capped at
+        # MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
+        if self._turn_auto and agent_responses and self.project_name != "_general":
+            iteration = 0
+            while iteration < MAX_AUTO_ITERATIONS:
+                try:
+                    decision = self._auto_pilot_decide(
+                        user_input=user_input,
+                        final_response=final_response,
+                        iteration=iteration,
+                    )
+                except KeyboardInterrupt:
+                    console.print(
+                        "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
+                        "[dim]Returning to manual mode for this turn.[/dim]"
+                    )
+                    break
+
+                if not decision.get("continue", False):
+                    break
+
+                next_msg = decision.get("next_message", "").strip()
+                if not next_msg:
+                    break
+
+                iteration += 1
+                console.print(
+                    f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
+                    f"[dim]iteration {iteration}/{MAX_AUTO_ITERATIONS}[/dim]  "
+                    f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
+                )
+
+                # Re-process with the auto-generated message.
+                # Temporarily disable auto-pilot to prevent recursive loops —
+                # the outer while-loop handles the iteration instead.
+                saved_auto = self._turn_auto
+                self._turn_auto = False
+                try:
+                    self.process(next_msg)
+                except KeyboardInterrupt:
+                    console.print(
+                        "\n[yellow]⚡ Auto-pilot interrupted.[/yellow]  "
+                        "[dim]Returning to manual mode.[/dim]"
+                    )
+                    break
+                finally:
+                    self._turn_auto = saved_auto
+
+                # Update final_response for next iteration's decision
+                if self.messages and self.messages[-1]["role"] == "assistant":
+                    final_response = self.messages[-1]["content"]
+
+            if iteration >= MAX_AUTO_ITERATIONS:
+                console.print(
+                    f"\n[yellow]⚠ Auto-pilot reached {MAX_AUTO_ITERATIONS} iterations — "
+                    "pausing for your input.[/yellow]"
+                )
+
     # ------------------------------------------------------------------
     # Direct @mention: bypass routing, talk to one agent directly
     # ------------------------------------------------------------------
@@ -2005,7 +2135,7 @@ class Orchestrator:
         if actions:
             write_dir = self.loaded_path if self.loaded_path else project_dir
             _norm_dirs = self._extra_normalize_dirs(project_dir)
-            outcomes = prompt_and_execute(actions, write_dir, normalize_dirs=_norm_dirs)
+            outcomes = prompt_and_execute(actions, write_dir, normalize_dirs=_norm_dirs, auto_mode=self._turn_auto)
             if outcomes:
                 response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
                 self._check_outcomes_for_lessons(role, outcomes)
@@ -2154,6 +2284,7 @@ class Orchestrator:
         # Session stats
         stats = get_session_stats()
         tdd_enabled, tdd_health_cmd = self.memory.load_tdd_mode()
+        auto_enabled = self.memory.load_auto_mode()
         self.display.show_status(
             project_name=self.project_name,
             info=info,
@@ -2167,6 +2298,7 @@ class Orchestrator:
             session_stats=stats,
             tdd_enabled=tdd_enabled,
             tdd_health_cmd=tdd_health_cmd,
+            auto_enabled=auto_enabled,
             safe_context=self.config.get("safe_context_tokens", 200_000),
             project_state=self._load_project_state(),
         )

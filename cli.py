@@ -544,6 +544,47 @@ def main(project: str | None, list_projects: bool, model: str | None):
                     else:
                         orchestrator.add_feedback(tokens[0], tokens[1])
 
+            elif parts[0] == "/auto":
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                auto_enabled = orchestrator.memory.load_auto_mode()
+
+                if not arg or arg == "status":
+                    status_label = "[bold green]ON[/bold green]" if auto_enabled else "[dim]OFF[/dim]"
+                    console.print(f"\n[bold]Auto Mode:[/bold] {status_label}")
+                    if auto_enabled:
+                        console.print(
+                            "[dim]• File writes auto-approved\n"
+                            "• Safe bash commands auto-approved\n"
+                            "• Destructive commands still require manual approval\n"
+                            "• Aria auto-pilots to the next step (max 5 iterations)[/dim]"
+                        )
+                    console.print()
+
+                elif arg == "on":
+                    orchestrator.memory.save_auto_mode(True)
+                    console.print(
+                        "\n[bold green]✓ Auto mode ON[/bold green]\n"
+                        "[dim]• File writes: auto-approved  ⚡\n"
+                        "• Safe bash: auto-approved  ⚡\n"
+                        "• Destructive bash (rm -rf, DROP TABLE, git push --force): manual approval\n"
+                        "• Aria auto-pilots between phases (max 5 iterations)\n"
+                        "• Press Ctrl+C at any time to interrupt[/dim]\n"
+                    )
+
+                elif arg == "off":
+                    orchestrator.memory.save_auto_mode(False)
+                    console.print(
+                        "\n[dim]Auto mode OFF — all actions require manual approval.[/dim]\n"
+                    )
+
+                else:
+                    console.print(
+                        "[dim]Usage:\n"
+                        "  /auto on      — enable auto-approve + auto-pilot\n"
+                        "  /auto off     — disable auto mode\n"
+                        "  /auto status  — show current auto mode setting[/dim]"
+                    )
+
             elif parts[0] == "/tdd":
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
                 tdd_enabled, tdd_health_cmd = orchestrator.memory.load_tdd_mode()
