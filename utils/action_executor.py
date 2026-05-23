@@ -43,9 +43,12 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r"\bsudo\s+rm\b", re.IGNORECASE),                # sudo rm anything
     re.compile(r"\bdel\s+/", re.IGNORECASE),                    # Windows del /s /q
     re.compile(r"\brmdir\s+/s", re.IGNORECASE),                 # Windows rmdir /s
-    re.compile(r"\bgit\s+(?:add|commit|push|pull|merge|rebase|checkout|switch|stash|tag|branch\s+-[dD])", re.IGNORECASE),  # ALL git write ops — user controls git
+    re.compile(r"\bgit\s+push", re.IGNORECASE),                   # git push (publishes to remote)
+    re.compile(r"\bgit\s+(?:merge|rebase|checkout|switch)\b", re.IGNORECASE),  # can lose uncommitted work
     re.compile(r"\bgit\s+reset\s+--hard", re.IGNORECASE),       # git reset --hard
     re.compile(r"\bgit\s+clean\s+.*-[df]", re.IGNORECASE),      # git clean -fd
+    re.compile(r"\bgit\s+stash\s+drop", re.IGNORECASE),         # git stash drop (destroys stash)
+    re.compile(r"\bgit\s+branch\s+-[dD]", re.IGNORECASE),       # git branch -d/-D (deletes branch)
     re.compile(r"\bdrop\s+(?:table|database)\b", re.IGNORECASE), # DROP TABLE/DATABASE
     re.compile(r"\btruncate\s+table\b", re.IGNORECASE),         # TRUNCATE TABLE
     re.compile(r"\bformat\s+[a-zA-Z]:", re.IGNORECASE),         # format C:

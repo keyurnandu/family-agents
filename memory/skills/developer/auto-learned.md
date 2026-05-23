@@ -3,7 +3,7 @@
 Lessons captured automatically from failures, corrections, and retrospectives.
 
 ### [2026-05-23 22:00] via user-correction
-NEVER run git commands (git add, git commit, git push, git pull, git checkout, git stash, etc.) unless the user EXPLICITLY asks for it. The user manages git themselves. Focus only on writing code, running tests, and fixing errors. Git is off-limits.
+Local git operations (git add, git commit, git tag, git stash) are fine — they're just local checkpoints. NEVER run git push, git merge, git rebase, git checkout, or git reset --hard without explicit user approval — these publish to remote or can lose uncommitted work.
 
 ### [2026-05-21 17:24] via bash-failure
 Always add `asyncio_mode = 'auto'` to pytest.ini when running async Playwright tests on Windows to prevent `ValueError: I/O operation on closed pipe` during asyncio cleanup. Alternatively, ensure all Playwright fixtures use proper `async with async_playwright()` context managers and add explicit event loop cleanup in conftest.py.

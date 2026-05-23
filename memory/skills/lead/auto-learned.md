@@ -3,7 +3,7 @@
 Lessons captured automatically from failures, corrections, and retrospectives.
 
 ### [2026-05-23 22:00] via user-correction
-NEVER run git commands (git add, git commit, git push, git pull, git checkout, git stash, etc.) unless the user EXPLICITLY asks for it. The user manages git themselves. Focus only on code review, architecture, and technical guidance. Git is off-limits.
+Local git operations (git add, git commit, git tag, git stash) are fine — they're just local checkpoints. NEVER run git push, git merge, git rebase, git checkout, or git reset --hard without explicit user approval — these publish to remote or can lose uncommitted work.
 
 ### [2026-05-21 17:44] via bash-failure
 Before running `uv run` commands, verify uv is installed and in PATH on the target system. On Windows, use `python scripts/migrate_p1_runner_field.py` directly as a fallback if uv isn't available.

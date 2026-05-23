@@ -72,26 +72,34 @@ class TestDestructiveBashDetection:
         assert is_destructive_bash("python -m pytest tests/ -v") is False
         assert is_destructive_bash("pip install -r requirements.txt") is False
 
-    def test_git_write_ops_are_destructive(self):
-        """ALL git write operations require manual approval — user controls git."""
+    def test_git_remote_and_destructive_ops_are_destructive(self):
+        """Git commands that publish to remote or can lose work require approval."""
         from utils.action_executor import is_destructive_bash
 
-        assert is_destructive_bash("git add .") is True
-        assert is_destructive_bash("git add -A") is True
-        assert is_destructive_bash("git commit -m 'test'") is True
+        # Remote — publishes to remote
         assert is_destructive_bash("git push origin main") is True
-        assert is_destructive_bash("git pull") is True
+        assert is_destructive_bash("git push --force origin main") is True
+        # Can lose uncommitted work
         assert is_destructive_bash("git merge feature-branch") is True
         assert is_destructive_bash("git rebase main") is True
         assert is_destructive_bash("git checkout feature") is True
         assert is_destructive_bash("git switch main") is True
-        assert is_destructive_bash("git stash") is True
-        assert is_destructive_bash("git tag v1.0") is True
+        # Destroys data
+        assert is_destructive_bash("git stash drop") is True
+        assert is_destructive_bash("git branch -d old-branch") is True
+        assert is_destructive_bash("git branch -D old-branch") is True
 
-    def test_git_read_ops_are_safe(self):
-        """Git read-only commands should NOT be destructive."""
+    def test_git_local_ops_are_safe(self):
+        """Local-only git ops (add, commit, tag, stash save) are safe — just checkpoints."""
         from utils.action_executor import is_destructive_bash
 
+        # Local checkpoints
+        assert is_destructive_bash("git add .") is False
+        assert is_destructive_bash("git add -A") is False
+        assert is_destructive_bash("git commit -m 'test'") is False
+        assert is_destructive_bash("git tag v1.0") is False
+        assert is_destructive_bash("git stash") is False
+        # Read-only
         assert is_destructive_bash("git status") is False
         assert is_destructive_bash("git log --oneline -5") is False
         assert is_destructive_bash("git diff") is False
