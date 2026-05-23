@@ -2144,8 +2144,10 @@ class Orchestrator:
         # auto-approve for file writes and safe bash.
         # Capped at MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
         _actionable = self._has_actionable_work(agent_responses, phases)
-        if _actionable and agent_responses and self.project_name != "_general":
+        if _actionable and agent_responses and self.project_name != "_general" \
+                and not getattr(self, "_auto_pilot_active", False):
             from utils.claude_client import get_session_stats
+            self._auto_pilot_active = True
             iteration = 0
             auto_previous_messages: list[str] = []
             pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
@@ -2197,10 +2199,8 @@ class Orchestrator:
                 )
 
                 # Re-process with the auto-generated message.
-                # Temporarily disable auto-pilot to prevent recursive loops —
-                # the outer while-loop handles the iteration instead.
-                saved_auto = self._turn_auto
-                self._turn_auto = False
+                # _auto_pilot_active flag prevents the inner process() call
+                # from starting its own nested auto-pilot loop.
                 try:
                     self.process(next_msg)
                 except KeyboardInterrupt:
@@ -2209,8 +2209,6 @@ class Orchestrator:
                         "[dim]Returning to manual mode.[/dim]"
                     )
                     break
-                finally:
-                    self._turn_auto = saved_auto
 
                 # Update pilot context for next iteration's decision
                 if self.messages and self.messages[-1]["role"] == "assistant":
@@ -2220,6 +2218,8 @@ class Orchestrator:
                     _pilot_context = self._augment_pilot_context_for_export(
                         _pilot_context, user_input
                     )
+
+            self._auto_pilot_active = False
 
             if iteration >= MAX_AUTO_ITERATIONS:
                 console.print(
