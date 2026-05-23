@@ -32,6 +32,22 @@ ROLE_DESCRIPTIONS = {
 }
 
 # Maps export type keywords to the agent best suited to write that doc
+# Next-step hints for each export doc type — used by both export_doc display
+# and the export path in process() to give auto-pilot rich context.
+_EXPORT_NEXT_HINTS = {
+    "requirements":     "start sprint planning or implementation",
+    "requirements-doc": "start sprint planning or implementation",
+    "user-stories":     "start implementation or review the stories",
+    "sprint-plan":      "work on epics, assign stories, or start implementation",
+    "architecture":     "write a technical spec or start implementation",
+    "architecture-doc": "write a technical spec or start implementation",
+    "technical-spec":   "start implementation",
+    "tech-spec":        "start implementation",
+    "api-docs":         "start implementation or write a test plan",
+    "test-plan":        "run tests or review test coverage",
+    "deployment-plan":  "deploy the application",
+}
+
 EXPORT_TYPE_MAP = {
     "requirements":   ("bsa",       "requirements-doc"),
     "requirement":    ("bsa",       "requirements-doc"),
@@ -1677,8 +1693,23 @@ class Orchestrator:
         if export_match:
             agent_role, doc_type = export_match
             self.export_doc(doc_type, agent_role)
-            self.db.save_message(self.project_name, "assistant", f"[Generated {doc_type}]")
-            self.messages.append({"role": "assistant", "content": f"[Generated {doc_type}]"})
+            # Rich message so auto-pilot has enough context to decide next step
+            hint = _EXPORT_NEXT_HINTS.get(
+                doc_type.lower(), "continue planning or start the next phase"
+            )
+            export_msg = (
+                f"[Generated {doc_type}] — Document saved. "
+                f"Next the team should {hint}."
+            )
+            self.db.save_message(self.project_name, "assistant", export_msg)
+            self.messages.append({"role": "assistant", "content": export_msg})
+            # Keep state.md current so auto-pilot's next iteration has fresh context
+            if self.project_name != "_general":
+                self._update_project_state(
+                    user_input,
+                    {agent_role or "pm": f"Generated {doc_type} document."},
+                    export_msg,
+                )
             console.print()
             return
 
@@ -2536,20 +2567,7 @@ class Orchestrator:
 
         # Show a clean confirmation — no truncated preview spam.
         # The full doc is on disk; the user can 'show <filename>' to read it.
-        _NEXT_HINTS = {
-            "requirements":    "start sprint planning or implementation",
-            "requirements-doc":"start sprint planning or implementation",
-            "user-stories":    "start implementation or review the stories",
-            "sprint-plan":     "work on epics, assign stories, or start implementation",
-            "architecture":    "write a technical spec or start implementation",
-            "architecture-doc":"write a technical spec or start implementation",
-            "technical-spec":  "start implementation",
-            "tech-spec":       "start implementation",
-            "api-docs":        "start implementation or write a test plan",
-            "test-plan":       "run tests or review test coverage",
-            "deployment-plan": "deploy the application",
-        }
-        hint = _NEXT_HINTS.get(doc_type.lower(), "continue planning or start the next phase")
+        hint = _EXPORT_NEXT_HINTS.get(doc_type.lower(), "continue planning or start the next phase")
         display_path = str(out_path) if self.loaded_path else f"projects/{self.project_name}/docs/{filename}"
         verb = "updated" if existing_doc_path else "created"
         console.print(

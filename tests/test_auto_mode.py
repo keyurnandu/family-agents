@@ -474,3 +474,51 @@ class TestAlwaysOnAutoPilot:
         pilot_context = orch._build_auto_pilot_context(final_response, agent_responses)
         assert len(pilot_context) > 0
         assert "ACTIONS TAKEN:" in pilot_context
+
+    def test_export_path_saves_rich_message(self, base_dir, config):
+        """Export path should save a message with enough context for auto-pilot
+        to decide next steps — not just '[Generated doc_type]'."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Mock export_doc so we don't actually call LLM
+        with patch.object(orch, "export_doc") as mock_export, \
+             patch.object(orch, "_detect_export_intent", return_value=("qa", "test-plan")), \
+             patch.object(orch, "_detect_and_save_correction"), \
+             patch.object(orch, "_update_project_state"):
+            orch.process("generate a test plan")
+
+        # The assistant message saved should be richer than just "[Generated test-plan]"
+        last_msg = orch.messages[-1]
+        assert last_msg["role"] == "assistant"
+        assert "test-plan" in last_msg["content"]
+        # Must include next-step hint for auto-pilot context
+        assert len(last_msg["content"]) > len("[Generated test-plan]")
+
+    def test_export_path_updates_project_state(self, base_dir, config):
+        """Export path should call _update_project_state so state.md is
+        current for the next auto-pilot iteration."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch.object(orch, "export_doc") as mock_export, \
+             patch.object(orch, "_detect_export_intent", return_value=("pm", "requirements")), \
+             patch.object(orch, "_detect_and_save_correction"), \
+             patch.object(orch, "_update_project_state") as mock_update:
+            orch.process("export the requirements doc")
+
+        mock_update.assert_called_once()
+        # The call should pass a meaningful context (not empty)
+        args, kwargs = mock_update.call_args
+        user_input_arg = args[0]
+        assert "requirements" in user_input_arg.lower() or "export" in user_input_arg.lower()
