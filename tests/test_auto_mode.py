@@ -151,6 +151,40 @@ class TestAutoApproveMode:
 
         assert any("FILE SKIPPED" in o for o in outcomes)
 
+    def test_direct_message_loads_auto_mode_from_disk(self, base_dir, config):
+        """@mention direct messages must reload _turn_auto from disk,
+        not use the stale __init__ default (False)."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Simulate /auto on — save to disk
+        orch.memory.save_auto_mode(True)
+        # __init__ set _turn_auto = False (stale)
+        assert orch._turn_auto is False
+
+        # Mock the agent to return a response with EXEC blocks
+        mock_agent = MagicMock()
+        mock_agent.respond.return_value = (
+            "Done.\n\nEXEC:file:test.py\n```python\npass\n```"
+        )
+        orch.agents["developer"] = mock_agent
+
+        # Mock prompt_and_execute to capture the auto_mode param
+        with patch("orchestrator.prompt_and_execute") as mock_pae, \
+             patch("orchestrator.console"):
+            mock_pae.return_value = ["FILE WRITTEN: test.py"]
+            orch.direct_message("developer", "write test.py")
+
+        # prompt_and_execute must have been called with auto_mode=True
+        mock_pae.assert_called_once()
+        _, kwargs = mock_pae.call_args
+        assert kwargs.get("auto_mode") is True
+
 
 # ── orchestrator: auto-pilot continuation ────────────────────────────
 

@@ -2162,6 +2162,10 @@ class Orchestrator:
 
     def direct_message(self, role: str, message: str):
         """Send a message directly to one named agent, skipping Aria's routing."""
+        # Reload auto-approve from disk (process() does this in its cache block,
+        # but direct_message bypasses process entirely)
+        self._turn_auto = self.memory.load_auto_mode()
+
         # Accept both role keys ("developer") and persona names ("sam")
         resolved = self._resolve_role(role)
         if not resolved:
