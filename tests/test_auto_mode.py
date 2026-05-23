@@ -71,8 +71,32 @@ class TestDestructiveBashDetection:
         assert is_destructive_bash("npm install") is False
         assert is_destructive_bash("python -m pytest tests/ -v") is False
         assert is_destructive_bash("pip install -r requirements.txt") is False
-        assert is_destructive_bash("git add .") is False
-        assert is_destructive_bash("git commit -m 'test'") is False
+
+    def test_git_write_ops_are_destructive(self):
+        """ALL git write operations require manual approval — user controls git."""
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("git add .") is True
+        assert is_destructive_bash("git add -A") is True
+        assert is_destructive_bash("git commit -m 'test'") is True
+        assert is_destructive_bash("git push origin main") is True
+        assert is_destructive_bash("git pull") is True
+        assert is_destructive_bash("git merge feature-branch") is True
+        assert is_destructive_bash("git rebase main") is True
+        assert is_destructive_bash("git checkout feature") is True
+        assert is_destructive_bash("git switch main") is True
+        assert is_destructive_bash("git stash") is True
+        assert is_destructive_bash("git tag v1.0") is True
+
+    def test_git_read_ops_are_safe(self):
+        """Git read-only commands should NOT be destructive."""
+        from utils.action_executor import is_destructive_bash
+
+        assert is_destructive_bash("git status") is False
+        assert is_destructive_bash("git log --oneline -5") is False
+        assert is_destructive_bash("git diff") is False
+        assert is_destructive_bash("git diff --stat") is False
+        assert is_destructive_bash("git show HEAD") is False
 
     def test_del_star_is_destructive(self):
         from utils.action_executor import is_destructive_bash

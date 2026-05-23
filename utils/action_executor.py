@@ -43,7 +43,7 @@ _DESTRUCTIVE_PATTERNS = [
     re.compile(r"\bsudo\s+rm\b", re.IGNORECASE),                # sudo rm anything
     re.compile(r"\bdel\s+/", re.IGNORECASE),                    # Windows del /s /q
     re.compile(r"\brmdir\s+/s", re.IGNORECASE),                 # Windows rmdir /s
-    re.compile(r"\bgit\s+push\s+.*--force", re.IGNORECASE),     # git push --force
+    re.compile(r"\bgit\s+(?:add|commit|push|pull|merge|rebase|checkout|switch|stash|tag|branch\s+-[dD])", re.IGNORECASE),  # ALL git write ops — user controls git
     re.compile(r"\bgit\s+reset\s+--hard", re.IGNORECASE),       # git reset --hard
     re.compile(r"\bgit\s+clean\s+.*-[df]", re.IGNORECASE),      # git clean -fd
     re.compile(r"\bdrop\s+(?:table|database)\b", re.IGNORECASE), # DROP TABLE/DATABASE

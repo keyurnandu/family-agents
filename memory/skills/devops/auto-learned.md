@@ -2,6 +2,9 @@
 
 Lessons captured automatically from failures, corrections, and retrospectives.
 
+### [2026-05-23 22:00] via user-correction
+NEVER run git commands (git add, git commit, git push, git pull, git checkout, git stash, etc.) unless the user EXPLICITLY asks for it. The user manages git themselves. Focus only on infrastructure, CI/CD config, and deployment scripts. Git is off-limits.
+
 ### [2026-05-22 02:17] via lesson
 Before running `reg add "HKLM\..."` registry modifications, ensure the shell is running with administrator privileges—HKLM writes require elevated access.
 
