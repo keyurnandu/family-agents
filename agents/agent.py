@@ -47,6 +47,73 @@ _ROLE_MEMORY_CATEGORIES: dict[str, set[str]] = {
 
 _IMPL_ROLES = {"developer", "lead", "qa", "devops"}
 
+# ── Auto-expand truncated project docs ───────────────────────────────
+# When a doc is truncated in the system prompt (to save tokens), this
+# function detects task-relevant docs and replaces the truncated block
+# with the full content before the LLM call — zero extra LLM cost.
+
+_DOC_TRUNCATED_RE = re.compile(r"\[DOC_TRUNCATED:([^:]+):(\d+)[^\]]*\]")
+
+
+def _expand_truncated_docs(
+    system_prompt: str,
+    task: str,
+    doc_reader,
+    force_all: bool = False,
+) -> str:
+    """Replace truncated doc blocks with full content when task references them.
+
+    doc_reader: callable(filename) → str|None, reads the full doc from disk.
+    force_all:  when True, expand ALL truncated docs regardless of task relevance
+                (used by the fallback when agent mentions truncation).
+    """
+    matches = list(_DOC_TRUNCATED_RE.finditer(system_prompt))
+    if not matches:
+        return system_prompt
+
+    task_lower = task.lower()
+
+    # Process in reverse so string positions stay valid after replacement
+    for m in reversed(matches):
+        filename = m.group(1)  # e.g., "architecture.md"
+
+        if not force_all:
+            stem = Path(filename).stem.lower()  # e.g., "architecture"
+            doc_words = [w for w in re.split(r"[-_]", stem) if len(w) > 2]
+            if not any(w in task_lower for w in doc_words):
+                continue
+
+        full_content = doc_reader(filename)
+        if not full_content:
+            continue
+
+        # Find the ### header that precedes this truncated block
+        header = f"### {filename}\n"
+        header_pos = system_prompt.rfind(header, 0, m.start())
+        if header_pos == -1:
+            continue
+
+        # End position: skip past the marker and any trailing newlines
+        end_pos = m.end()
+        while end_pos < len(system_prompt) and system_prompt[end_pos] == "\n":
+            end_pos += 1
+
+        # Replace the entire truncated block with full content
+        system_prompt = (
+            system_prompt[:header_pos]
+            + f"### {filename}\n{full_content.strip()}\n"
+            + system_prompt[end_pos:]
+        )
+
+    return system_prompt
+
+
+# Words that indicate the agent noticed truncation in its context
+_TRUNC_MENTION_RE = re.compile(
+    r"truncat|cut.?off|cuts.?off|incomplete.+doc|missing.+section|missing.+content",
+    re.IGNORECASE,
+)
+
 _EXEC_INSTRUCTIONS = (
     "## Executing Actions\n"
     "When you want to create or modify a file, or run a shell command, use these exact tags "
@@ -308,6 +375,28 @@ class Agent:
         except Exception as e:
             return f"(peer consultation failed: {e})"
 
+    def _read_full_doc(self, filename: str) -> str | None:
+        """Read a full project doc from disk (project docs or loaded codebase)."""
+        loaded_path = getattr(self.orchestrator, "loaded_path", None) if self.orchestrator else None
+
+        if loaded_path:
+            fpath = loaded_path / "docs" / filename
+            if fpath.exists():
+                try:
+                    return fpath.read_text(encoding="utf-8", errors="replace")
+                except Exception:
+                    pass
+
+        project_docs = self.base_dir / "projects" / self.memory.project_name / "docs"
+        fpath = project_docs / filename
+        if fpath.exists():
+            try:
+                return fpath.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+        return None
+
     def respond(
         self,
         task: str,
@@ -323,6 +412,12 @@ class Agent:
         only once regardless of how many agents request it.
         """
         system_prompt = self._build_system_prompt(task=task)
+
+        # Auto-expand truncated project docs when task references them.
+        # Zero extra LLM cost — just a disk read before the call.
+        system_prompt = _expand_truncated_docs(
+            system_prompt, task, self._read_full_doc
+        )
 
         prompt_parts = []
         if history_text:
@@ -500,6 +595,25 @@ class Agent:
                             "Use `/load <path>` to point the team at your project directory, "
                             "then ask your question again."
                         )
+
+        # Fallback: if agent mentions truncation in its response but didn't emit
+        # READ_FILE, force-expand ALL remaining truncated docs and re-call.
+        # This catches cases where the pre-expansion heuristic missed a relevant doc.
+        if (
+            _TRUNC_MENTION_RE.search(response)
+            and not re.findall(r"READ_FILE:([^\n]+)", response)
+            and _DOC_TRUNCATED_RE.search(system_prompt)
+        ):
+            expanded = _expand_truncated_docs(
+                system_prompt, task, self._read_full_doc, force_all=True
+            )
+            if expanded != system_prompt:
+                try:
+                    response = call_claude(
+                        prompt=prompt, system_prompt=expanded, model=self.model
+                    )
+                except Exception:
+                    pass  # keep original response
 
         # Handle ASK_COLLEAGUE markers (one round only)
         colleagues_needed = re.findall(

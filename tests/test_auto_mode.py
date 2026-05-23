@@ -1367,3 +1367,121 @@ class TestFailureLoggingFromOutcomes:
         assert len(rows) == 3
         categories = {r["category"] for r in rows}
         assert categories == {"bash_error", "health_check_fail", "file_blocked"}
+
+
+# ── Auto-expand truncated docs ──────────────────────────────────────
+
+class TestDocAutoExpand:
+    """When a doc is truncated in an agent's system prompt, the system should
+    auto-expand it if the task references that doc — zero extra LLM calls."""
+
+    def test_truncation_marker_is_parseable(self, base_dir):
+        """load_project_docs should produce [DOC_TRUNCATED:filename:size] markers."""
+        from utils.memory_manager import MemoryManager
+
+        mm = MemoryManager(base_dir, "proj")
+        docs_dir = base_dir / "projects" / "proj" / "docs"
+        docs_dir.mkdir(parents=True)
+        (docs_dir / "architecture.md").write_text("A" * 5000, encoding="utf-8")
+
+        result = mm.load_project_docs(max_docs=1, max_chars_each=1500)
+        assert "[DOC_TRUNCATED:architecture.md:5000" in result
+        assert "READ_FILE:docs/architecture.md" in result
+
+    def test_short_doc_no_truncation_marker(self, base_dir):
+        """Docs shorter than max_chars_each should NOT have a truncation marker."""
+        from utils.memory_manager import MemoryManager
+
+        mm = MemoryManager(base_dir, "proj")
+        docs_dir = base_dir / "projects" / "proj" / "docs"
+        docs_dir.mkdir(parents=True)
+        (docs_dir / "notes.md").write_text("Short note", encoding="utf-8")
+
+        result = mm.load_project_docs(max_docs=1, max_chars_each=1500)
+        assert "DOC_TRUNCATED" not in result
+        assert "Short note" in result
+
+    def test_expand_replaces_truncated_when_task_matches(self):
+        """Auto-expand should replace truncated block with full content for relevant tasks."""
+        from agents.agent import _expand_truncated_docs
+
+        prompt = (
+            "Preamble\n\n"
+            "### architecture.md\n"
+            "# Architecture\nSection 1 content only.\n\n"
+            "[DOC_TRUNCATED:architecture.md:5000 — use READ_FILE:docs/architecture.md for full content]\n\n"
+            "Other sections follow"
+        )
+        full_content = "# Architecture\nSection 1 content only.\n## Section 2\nFull deep content."
+
+        reader = lambda fname: full_content if fname == "architecture.md" else None
+        result = _expand_truncated_docs(prompt, "review the architecture design", reader)
+
+        assert "DOC_TRUNCATED" not in result
+        assert "Full deep content" in result
+        assert "Other sections follow" in result  # rest preserved
+        assert "Preamble" in result  # preamble preserved
+
+    def test_expand_skips_when_task_unrelated(self):
+        """Auto-expand should NOT expand docs unrelated to the task."""
+        from agents.agent import _expand_truncated_docs
+
+        prompt = (
+            "### architecture.md\n"
+            "Truncated content.\n\n"
+            "[DOC_TRUNCATED:architecture.md:5000 — use READ_FILE:docs/architecture.md for full content]"
+        )
+        reader = lambda fname: "FULL CONTENT"
+
+        result = _expand_truncated_docs(prompt, "fix the login button CSS", reader)
+        assert "DOC_TRUNCATED" in result  # NOT expanded
+        assert "FULL CONTENT" not in result
+
+    def test_expand_no_markers_returns_unchanged(self):
+        """Prompt without truncation markers should be returned unchanged."""
+        from agents.agent import _expand_truncated_docs
+
+        prompt = "### notes.md\nFull short doc.\n\nOther stuff"
+        reader = lambda fname: "anything"
+        result = _expand_truncated_docs(prompt, "any task", reader)
+        assert result == prompt
+
+    def test_expand_force_all_ignores_task_relevance(self):
+        """force_all=True should expand ALL truncated docs regardless of task."""
+        from agents.agent import _expand_truncated_docs
+
+        prompt = (
+            "### architecture.md\n"
+            "Truncated.\n\n"
+            "[DOC_TRUNCATED:architecture.md:5000 — use READ_FILE:docs/architecture.md for full content]\n\n"
+            "### sprint-plan.md\n"
+            "Also truncated.\n\n"
+            "[DOC_TRUNCATED:sprint-plan.md:3000 — use READ_FILE:docs/sprint-plan.md for full content]"
+        )
+        docs = {
+            "architecture.md": "Full architecture content",
+            "sprint-plan.md": "Full sprint plan content",
+        }
+        reader = lambda fname: docs.get(fname)
+
+        result = _expand_truncated_docs(
+            prompt, "unrelated task about CSS", reader, force_all=True,
+        )
+        assert "DOC_TRUNCATED" not in result
+        assert "Full architecture content" in result
+        assert "Full sprint plan content" in result
+
+    def test_expand_multi_word_doc_name_matches(self):
+        """Docs with hyphenated names like sprint-plan.md should match task words."""
+        from agents.agent import _expand_truncated_docs
+
+        prompt = (
+            "### sprint-plan.md\n"
+            "Truncated.\n\n"
+            "[DOC_TRUNCATED:sprint-plan.md:4000 — use READ_FILE:docs/sprint-plan.md for full content]"
+        )
+        reader = lambda fname: "Full sprint plan" if fname == "sprint-plan.md" else None
+
+        result = _expand_truncated_docs(prompt, "what's in the sprint plan?", reader)
+        assert "DOC_TRUNCATED" not in result
+        assert "Full sprint plan" in result

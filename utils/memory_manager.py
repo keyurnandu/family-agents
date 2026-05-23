@@ -189,7 +189,8 @@ class MemoryManager:
                 if len(content) > max_chars_each:
                     content = (
                         content[:max_chars_each]
-                        + f"\n\n[Truncated — {len(content):,} chars total. Full doc at docs/{doc_file.name}]"
+                        + f"\n\n[DOC_TRUNCATED:{doc_file.name}:{len(content)}"
+                        f" — use READ_FILE:docs/{doc_file.name} for full content]"
                     )
                 parts.append(f"### {doc_file.name}\n{content.strip()}")
             except Exception:
