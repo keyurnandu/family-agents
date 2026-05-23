@@ -1326,7 +1326,10 @@ class Orchestrator:
                 ),
                 model="haiku",
             )
-        except Exception:
+        except Exception as exc:
+            console.print(
+                f"[yellow]  ⚠ Auto-pilot stopping — decision call failed: {exc}[/yellow]"
+            )
             return _STOP
 
         # Guard 3: duplicate detection — catch loops where Haiku keeps
@@ -2170,6 +2173,10 @@ class Orchestrator:
                     break
 
                 if not decision.get("continue", False):
+                    if iteration > 0:
+                        console.print(
+                            "[dim]  ✓ Auto-pilot completed — no further steps needed.[/dim]"
+                        )
                     break
 
                 next_msg = decision.get("next_message", "").strip()
