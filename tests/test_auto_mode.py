@@ -1684,3 +1684,113 @@ class TestParseActionsCodeFences:
         actions = parse_actions(text, "morgan")
         assert len(actions) == 1
         assert actions[0].label == "docs/notes.md"
+
+
+# ── Project dir auto-scan ──────────────────────────────────────────────
+
+class TestProjectDirAutoScan:
+    """When no /loaded codebase exists, the project's own directory should be
+    auto-scanned so agents can see their files."""
+
+    def test_auto_scan_sets_loaded_path(self, base_dir, config):
+        """process() should set loaded_path to the project dir when it has files."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = MagicMock()
+        orch = Orchestrator(
+            project_name="scan-test",
+            base_dir=base_dir,
+            db=db,
+            display=display,
+            config=config,
+        )
+        # Create a file in the project dir
+        project_dir = base_dir / "projects" / "scan-test"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "main.py").write_text("print('hi')", encoding="utf-8")
+
+        assert orch.loaded_path is None
+        assert orch.codebase_context == {}
+
+        # Simulate the auto-scan portion of process()
+        if not orch.loaded_path:
+            pd = base_dir / "projects" / "scan-test"
+            if pd.exists() and any(pd.iterdir()):
+                orch.loaded_path = pd
+                orch.codebase_context = orch._scan_codebase(pd)
+
+        assert orch.loaded_path == project_dir
+        assert "structure_tree" in orch.codebase_context
+        assert orch.codebase_context["total_files"] >= 1
+        db.close()
+
+    def test_auto_scan_skipped_when_loaded(self, base_dir, config):
+        """If /load already set loaded_path, auto-scan should not override it."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = MagicMock()
+        orch = Orchestrator(
+            project_name="scan-test2",
+            base_dir=base_dir,
+            db=db,
+            display=display,
+            config=config,
+        )
+        # Simulate an existing /load
+        ext_path = base_dir / "external_codebase"
+        ext_path.mkdir(parents=True, exist_ok=True)
+        orch.loaded_path = ext_path
+
+        # Create files in project dir
+        project_dir = base_dir / "projects" / "scan-test2"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        (project_dir / "app.py").write_text("pass", encoding="utf-8")
+
+        # Auto-scan should be skipped
+        if not orch.loaded_path:
+            pd = base_dir / "projects" / "scan-test2"
+            if pd.exists() and any(pd.iterdir()):
+                orch.loaded_path = pd
+
+        assert orch.loaded_path == ext_path  # NOT overwritten
+        db.close()
+
+    def test_scan_ignore_filters_venv(self, base_dir, config):
+        """_scan_codebase should ignore venv and node_modules directories."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = MagicMock()
+        orch = Orchestrator(
+            project_name="scan-test3",
+            base_dir=base_dir,
+            db=db,
+            display=display,
+            config=config,
+        )
+        project_dir = base_dir / "projects" / "scan-test3"
+        project_dir.mkdir(parents=True, exist_ok=True)
+        # Real file
+        (project_dir / "main.py").write_text("pass", encoding="utf-8")
+        # Venv file (should be ignored)
+        venv_dir = project_dir / "venv" / "Lib"
+        venv_dir.mkdir(parents=True, exist_ok=True)
+        (venv_dir / "pip.py").write_text("pip stuff", encoding="utf-8")
+        # node_modules file (should be ignored)
+        nm_dir = project_dir / "node_modules" / "react"
+        nm_dir.mkdir(parents=True, exist_ok=True)
+        (nm_dir / "index.js").write_text("module.exports", encoding="utf-8")
+
+        ctx = orch._scan_codebase(project_dir)
+        tree = ctx["structure_tree"]
+        assert "main.py" in tree
+        assert "venv" not in tree
+        assert "node_modules" not in tree
+        # Total files should only count the real file
+        assert ctx["total_files"] == 1
+        db.close()

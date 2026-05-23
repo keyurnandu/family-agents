@@ -21,6 +21,13 @@ console = Console()
 # Safety cap for auto-pilot continuation loop — prevents runaway iterations
 MAX_AUTO_ITERATIONS = 5
 
+# Directories to ignore when scanning project/codebase folder trees.
+# Shared between _scan_codebase() and _update_project_state().
+_SCAN_IGNORE = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv",
+    "dist", "build", ".next", "target", ".gradle", ".idea", ".vscode",
+}
+
 ROLE_DESCRIPTIONS = {
     "pm": "Project planning, timelines, stakeholder management, scope",
     "bsa": "Requirements, user stories, process mapping, acceptance criteria",
@@ -342,10 +349,7 @@ class Orchestrator:
             "main.py", "app.py", "manage.py", "run.py",
             "src/main.py", "src/app.py",
         ]
-        IGNORE = {
-            ".git", "node_modules", "__pycache__", ".venv", "venv",
-            "dist", "build", ".next", "target", ".gradle", ".idea", ".vscode",
-        }
+        IGNORE = _SCAN_IGNORE
 
         file_count = 0
 
@@ -1121,7 +1125,7 @@ class Orchestrator:
                     current_state = self._load_project_state()
                     project_dir = self.base_dir / "projects" / self.project_name
 
-                    # Collect real files (skip .gitkeep, state.md, docs/)
+                    # Collect real files (skip .gitkeep, state.md, docs/, venv, node_modules)
                     file_list: list[str] = []
                     if project_dir.exists():
                         file_list = [
@@ -1130,6 +1134,7 @@ class Orchestrator:
                             if f.is_file()
                             and f.name not in (".gitkeep", "state.md")
                             and not str(f.relative_to(project_dir)).startswith("docs")
+                            and not any(part in _SCAN_IGNORE for part in f.relative_to(project_dir).parts)
                         ][:20]
 
                     # Compact summary of agent responses for the prompt
@@ -1925,6 +1930,17 @@ class Orchestrator:
         )
         # Project state — load once, used by routing + synthesis
         self._turn_state = self._load_project_state()
+
+        # ── Auto-scan project directory when no /loaded codebase exists ──
+        # Without this, agents created within family-agents (not /loaded)
+        # have ZERO visibility into project files — no folder tree, no
+        # READ_FILE, nothing.  Re-scan each turn so newly written files
+        # become visible immediately.
+        if not self.loaded_path:
+            project_dir = self.base_dir / "projects" / self.project_name
+            if project_dir.exists() and any(project_dir.iterdir()):
+                self.loaded_path = project_dir
+                self.codebase_context = self._scan_codebase(project_dir)
 
         # ── Resume paused auto-pilot ─────────────────────────────────────
         # If auto-pilot was paused (cap, failure, duplicate) and the user
