@@ -1319,6 +1319,15 @@ class Orchestrator:
                 _stop_reason = "interrupted"
                 break
 
+            # If the inner process() caught KeyboardInterrupt (sets _interrupted=True
+            # and returns normally), stop the loop — no second Ctrl+C needed.
+            if self._interrupted:
+                console.print(
+                    "[yellow]⚡ Auto-pilot stopping — interrupted during processing.[/yellow]"
+                )
+                _stop_reason = "interrupted"
+                break
+
             # Update pilot context for next iteration's decision
             if self.messages and self.messages[-1]["role"] == "assistant":
                 _pilot_context = self.messages[-1]["content"]

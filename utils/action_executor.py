@@ -28,6 +28,11 @@ from typing import Literal
 
 from rich.console import Console
 from rich.panel import Panel
+
+# Maximum seconds a bash command may run before being killed.
+# Prevents subprocess.run from blocking forever (Ctrl+C can't interrupt
+# a C-level pipe wait on Windows).
+BASH_TIMEOUT_SECONDS = 120
 from rich.prompt import Confirm
 from rich.syntax import Syntax
 from rich.table import Table
@@ -403,15 +408,26 @@ def prompt_and_execute(
             # Capture output so we can: (a) print it for the user, and
             # (b) inject it back into the agent pipeline so the agent can
             # reason about test results, errors, etc.
-            result = subprocess.run(
-                safe_cmd,
-                shell=True,
-                cwd=project_dir,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
+            try:
+                result = subprocess.run(
+                    safe_cmd,
+                    shell=True,
+                    cwd=project_dir,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=BASH_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired:
+                console.print(
+                    f"  [red]✗ Timed out after {BASH_TIMEOUT_SECONDS}s[/red]\n"
+                )
+                outcomes.append(
+                    f"BASH FAILED (timed out after {BASH_TIMEOUT_SECONDS}s): {action.label}"
+                )
+                continue
+
             output = (result.stdout + result.stderr).strip()
 
             # Print the captured output so the user still sees it

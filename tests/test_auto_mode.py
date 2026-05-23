@@ -1011,3 +1011,76 @@ class TestAutoPilotResume:
 
         # User interrupted — don't nag them with "type continue"
         assert orch._pending_autopilot is None
+
+    def test_inner_process_interrupt_stops_loop(self, base_dir, config):
+        """If the inner process() catches KeyboardInterrupt and sets _interrupted,
+        the autopilot loop should stop on the NEXT iteration — no extra Ctrl+C needed."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Mock _auto_pilot_decide to always continue
+        call_count = 0
+        def mock_decide(user_input, final_response, iteration=0, previous_messages=None):
+            nonlocal call_count
+            call_count += 1
+            return {"continue": True, "next_message": f"Step {call_count}"}
+
+        # Mock process(): simulate inner process() catching Ctrl+C on iteration 1
+        # (sets _interrupted=True, returns normally — swallows the interrupt)
+        def mock_process(msg):
+            orch._interrupted = True  # inner process() caught Ctrl+C
+            orch.messages.append({"role": "assistant", "content": "Interrupted."})
+
+        with patch.object(orch, "_auto_pilot_decide", side_effect=mock_decide), \
+             patch.object(orch, "process", side_effect=mock_process):
+            orch._run_autopilot_loop("build auth", "Code written.")
+
+        # Should have stopped after 1 iteration, not continued to MAX_AUTO_ITERATIONS
+        assert call_count == 1
+        # Should NOT save pending (user interrupted)
+        assert orch._pending_autopilot is None
+
+
+class TestBashSubprocessTimeout:
+    """Bash command execution should have a timeout to prevent hanging."""
+
+    def test_subprocess_run_has_timeout(self):
+        """The subprocess.run call in prompt_and_execute should include a timeout."""
+        import inspect
+        from utils.action_executor import prompt_and_execute
+
+        source = inspect.getsource(prompt_and_execute)
+        # The subprocess.run call must include timeout parameter
+        assert "timeout=" in source, (
+            "subprocess.run in prompt_and_execute must have a timeout parameter "
+            "to prevent hanging on Windows"
+        )
+
+    def test_timeout_expired_produces_failure_outcome(self):
+        """When a command times out, it should produce a BASH FAILED outcome."""
+        import subprocess
+        from utils.action_executor import prompt_and_execute, Action
+
+        action = Action(
+            kind="bash",
+            content="ping -n 300 127.0.0.1",  # would take 5 min without timeout
+            agent_name="Sam",
+            label="long-running command",
+        )
+
+        with patch("utils.action_executor.subprocess.run",
+                    side_effect=subprocess.TimeoutExpired("cmd", 120)):
+            outcomes = prompt_and_execute(
+                [action],
+                Path("."),
+                auto_mode=True,
+            )
+
+        assert len(outcomes) == 1
+        assert "BASH FAILED" in outcomes[0]
+        assert "timed out" in outcomes[0].lower()
