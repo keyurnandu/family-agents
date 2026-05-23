@@ -19,7 +19,7 @@ flowchart TD
         CMD -->|/paste · """| PASTE[Paste mode\naccumulate multi-line\nthen /end to send]
         CMD -->|/skill add/list/remove| SKILLS_CMD[Skill management]
         CMD -->|/export type| EXPORT[Export doc\nrequirements · architecture\nsprint-plan · api-docs]
-        CMD -->|/auto on/off| AUTO_CMD[Auto mode config\nauto-approve + auto-pilot]
+        CMD -->|/auto on/off| AUTO_CMD[Auto-approve config\nfile + bash approval only]
         CMD -->|/tdd on/off/health| TDD_CMD[TDD mode config]
         CMD -->|/load path| CODEBASE[Load codebase\ninto context]
         CMD -->|/model alias| MODEL_SW[Switch model\nhaiku · sonnet · opus]
@@ -57,7 +57,7 @@ flowchart TD
 
         SYNTH --> DISP[Display to user\n+ token bar\n% of safe_context_tokens\ndefault 200k]
 
-        DISP --> AUTO_CHK{Auto mode?\n_turn_auto}
+        DISP --> AUTO_CHK{Actionable work?\n_has_actionable_work}
         AUTO_CHK -->|yes| APILOT[_auto_pilot_decide\nHaiku JSON call\ncontinue? next_message?]
         APILOT -->|continue + next_msg| PROCESS
         APILOT -->|done or max 5| STOP((🛑))
@@ -222,7 +222,7 @@ flowchart TD
 | **Export doc update-in-place** | `export_doc()` globs `docs/{type}*.md` before generating — if found, the existing doc's full content is injected into the prompt with "update and enhance" instructions; the file is overwritten in place instead of creating a dated duplicate |
 | **Export anti-truncation** | Export prompt explicitly overrides brevity rules: "Write the COMPLETE, full-length document — ignore any brevity rules. Output the entire document with no truncation." Summary extraction raised from 5000→10000 chars |
 | **Export docs in loaded codebase** | When a codebase is `/load`ed, `export_doc()` writes to `loaded_path/docs/` (not `projects/<name>/docs/`), file list reflects the loaded codebase, and `load_project_docs()` checks both locations (deduped by filename, loaded path takes priority) |
-| **Auto mode** | `/auto on` auto-approves file writes + safe bash (no interactive prompt); destructive commands (`rm -rf`, `DROP TABLE`, `git push --force`, etc.) matched via `_DESTRUCTIVE_PATTERNS` regex list always require manual confirmation |
-| **Auto-pilot loop** | After synthesis, `_auto_pilot_decide()` asks Haiku if a concrete next step exists — if yes, `process()` is re-invoked with the auto-generated message; `_turn_auto` temporarily set to False during recursion to prevent nested loops; Ctrl+C breaks out cleanly |
+| **Auto-approve** | `/auto on` auto-approves file writes + safe bash (no interactive prompt); destructive commands (`rm -rf`, `DROP TABLE`, `git push --force`, etc.) matched via `_DESTRUCTIVE_PATTERNS` regex list always require manual confirmation |
+| **Always-on auto-pilot** | After synthesis, `_has_actionable_work()` checks for multi-phase routing or ACTIONS TAKEN in responses — if actionable, `_auto_pilot_decide()` asks Haiku if a concrete next step exists; not gated by `/auto` toggle (that only controls approval); `_turn_auto` temporarily set to False during recursion to prevent nested loops; Ctrl+C breaks out cleanly |
 | **Auto-pilot safety** | Three guards checked before/after each Haiku call: (1) failure exit — `BASH FAILED` or `HEALTH_CHECK: FAILED` in last response → immediate stop (zero-cost string check, no LLM call); (2) duplicate detection — `SequenceMatcher.ratio() > 0.80` against all previous `next_message` strings → stop on loops; (3) hard cap at `MAX_AUTO_ITERATIONS=5` |
-| **Test suite** | 109 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
+| **Test suite** | 113 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |

@@ -328,8 +328,8 @@ class TestAutoPilotDecision:
         # Should force-stop regardless of what haiku says
         assert result["continue"] is False
 
-    def test_synthesis_suppresses_next_steps_in_auto(self, base_dir, config):
-        """In auto mode, synthesis prompt should tell Aria NOT to list options."""
+    def test_synthesis_always_concise(self, base_dir, config):
+        """Synthesis prompt should ALWAYS use concise style — not gated by /auto."""
         from orchestrator import Orchestrator
         from utils.db_manager import DBManager
         from utils.display import Display
@@ -337,13 +337,83 @@ class TestAutoPilotDecision:
         db = DBManager(base_dir / "db" / "conversations.db")
         display = Display()
         orch = Orchestrator("test", base_dir, db, display, config=config)
-        orch._turn_auto = True
+        # /auto is OFF — synthesis should still be concise
+        orch._turn_auto = False
 
         prompt = orch._synthesis_prompt(
             "build the auth system",
             {"developer": "I'll implement the login page."},
         )
-        # In auto mode, the prompt should instruct Aria NOT to ask next steps
-        assert "Auto-pilot is active" in prompt
-        # The "Always close your response with" instruction should NOT appear
+        # Should NEVER ask "what would you like to do next" regardless of /auto
+        assert "Always close your response with" not in prompt
+        # Should instruct Aria not to list options
+        assert "Do NOT ask" in prompt
+
+
+# ── Option B: always-on auto-pilot ─────────────────────────────────
+
+class TestAlwaysOnAutoPilot:
+    """Auto-pilot always runs for actionable tasks — NOT gated by /auto toggle."""
+
+    def test_has_actionable_work_with_actions_taken(self, base_dir, config):
+        """_has_actionable_work returns True when responses contain ACTIONS TAKEN."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        responses = {"developer": "Code written.\n\nACTIONS TAKEN:\nFILE WRITTEN: src/app.py"}
+        phases = [{"name": "Implement", "agents": ["developer"], "tasks": {"developer": "build it"}}]
+        assert orch._has_actionable_work(responses, phases) is True
+
+    def test_has_actionable_work_with_multi_phase(self, base_dir, config):
+        """_has_actionable_work returns True for multi-phase routing."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        responses = {"pm": "Requirements gathered."}
+        phases = [
+            {"name": "Requirements", "agents": ["pm"], "tasks": {"pm": "gather"}},
+            {"name": "Implement", "agents": ["developer"], "tasks": {"developer": "build"}},
+        ]
+        assert orch._has_actionable_work(responses, phases) is True
+
+    def test_has_actionable_work_false_for_simple_qa(self, base_dir, config):
+        """_has_actionable_work returns False for simple Q&A responses."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        responses = {"pm": "The project uses Node.js with Express."}
+        phases = [{"name": "General", "agents": ["pm"], "tasks": {"pm": "explain"}}]
+        assert orch._has_actionable_work(responses, phases) is False
+
+    def test_synthesis_concise_without_auto_mode(self, base_dir, config):
+        """Synthesis stays concise even when /auto is OFF."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+        orch._turn_auto = False  # /auto is OFF
+
+        prompt = orch._synthesis_prompt(
+            "build the auth system",
+            {"developer": "I'll implement the login page."},
+        )
+        # Even without /auto, should NOT ask "what would you like to do next"
         assert "Always close your response with" not in prompt

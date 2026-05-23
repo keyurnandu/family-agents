@@ -680,22 +680,11 @@ class Orchestrator:
             "If agents have file changes queued, tell the customer they will be prompted to approve them. "
             "If there are open questions for the customer, group them at the end."
             + state_hint
+            + "\n\nEnd with a concise status summary of what was accomplished. "
+            "If there is clear follow-up work, briefly state what the team will do next. "
+            "Do NOT ask 'What would you like to do next?' or list numbered options — "
+            "the system will automatically continue if there is actionable work remaining."
         )
-        if self._turn_auto:
-            synth_instruction += (
-                "\n\nAuto-pilot is active. End with a concise status summary — "
-                "do NOT ask 'What would you like to do next?' or list options. "
-                "The system will automatically decide the next step."
-            )
-        else:
-            synth_instruction += (
-                "\n\nIMPORTANT: Always close your response with a brief **What would you like to do next?** "
-                "section offering 2–3 concrete options that directly follow from the project state above "
-                "(e.g. if auth is complete and tests are missing → suggest writing tests; "
-                "if implementation is done → suggest deployment or review). "
-                "Keep each option to one short line. Be specific — reference actual components or files "
-                "from the project, not generic phrases like 'continue development'."
-            )
         parts.append(synth_instruction)
         return "\n".join(parts)
 
@@ -1169,6 +1158,19 @@ class Orchestrator:
     # ------------------------------------------------------------------
     # Auto-pilot — decide whether to continue without user input
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_actionable_work(agent_responses: dict, phases: list[dict]) -> bool:
+        """Return True when the turn produced actionable work worth auto-continuing.
+
+        Triggers on:
+        - Multi-phase routing (requirements → implementation → QA = substantial task)
+        - Any agent response containing ACTIONS TAKEN (files written, bash executed)
+        """
+        if len(phases) > 1:
+            return True
+        combined = "\n".join(agent_responses.values())
+        return "ACTIONS TAKEN:" in combined
 
     @staticmethod
     def _message_similarity(a: str, b: str) -> float:
@@ -2002,8 +2004,8 @@ class Orchestrator:
                         prompt=(
                             f"{self._format_history()}\n\nCustomer: {user_input}\n\n"
                             "Respond as Aria, the project coordinator. "
-                            "End with a brief 'What would you like to do next?' "
-                            "offering 2–3 concrete next steps."
+                            "Be concise. If there is a natural next step, "
+                            "briefly state what the team can do next."
                         ),
                         system_prompt=self._synthesis_system_prompt(),
                         model=self.model,
@@ -2040,10 +2042,13 @@ class Orchestrator:
         console.print()
 
         # ── Auto-pilot continuation loop ─────────────────────────────────
-        # When /auto is on, Aria decides whether to continue to the next
-        # logical step without waiting for user input. Capped at
-        # MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
-        if self._turn_auto and agent_responses and self.project_name != "_general":
+        # Aria always decides whether to continue to the next logical step
+        # when the turn produced actionable work (multi-phase routing or
+        # EXEC blocks executed). Not gated by /auto — that only controls
+        # auto-approve for file writes and safe bash.
+        # Capped at MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
+        _actionable = self._has_actionable_work(agent_responses, phases)
+        if _actionable and agent_responses and self.project_name != "_general":
             from utils.claude_client import get_session_stats
             iteration = 0
             auto_previous_messages: list[str] = []
