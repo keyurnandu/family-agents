@@ -522,3 +522,43 @@ class TestAlwaysOnAutoPilot:
         args, kwargs = mock_update.call_args
         user_input_arg = args[0]
         assert "requirements" in user_input_arg.lower() or "export" in user_input_arg.lower()
+
+    def test_auto_pilot_augments_export_context(self, base_dir, config):
+        """When auto-pilot's last iteration was an export, the context passed
+        to _auto_pilot_decide should be augmented with the original request
+        so Haiku doesn't stall on the terse export message."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Simulate: auto-pilot loop reads an export message from self.messages
+        # The _augment_pilot_context_for_export helper should enrich it
+        export_msg = "[Generated test-plan] — Document saved. Next the team should run tests."
+        original_request = "build the authentication system"
+
+        augmented = orch._augment_pilot_context_for_export(export_msg, original_request)
+
+        # Must include the original request so Haiku can reason about remaining work
+        assert original_request in augmented
+        # Must signal that the export was an intermediate step
+        assert "intermediate" in augmented.lower() or "sub-step" in augmented.lower() or "part of" in augmented.lower()
+
+    def test_auto_pilot_no_augment_for_normal_response(self, base_dir, config):
+        """Normal (non-export) responses should NOT be augmented."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        normal_msg = "The team implemented the login page with JWT auth."
+        result = orch._augment_pilot_context_for_export(normal_msg, "build auth")
+
+        # Normal messages should be returned unchanged
+        assert result == normal_msg

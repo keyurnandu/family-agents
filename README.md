@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-148 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+150 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 

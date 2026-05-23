@@ -1195,6 +1195,26 @@ class Orchestrator:
         return ""
 
     @staticmethod
+    def _augment_pilot_context_for_export(
+        pilot_context: str, original_request: str
+    ) -> str:
+        """When the last auto-pilot iteration was a doc export, augment the
+        context so Haiku understands it was an intermediate step and checks
+        for remaining work against the original request.
+
+        Non-export responses pass through unchanged.
+        """
+        if not pilot_context.startswith("[Generated"):
+            return pilot_context
+        return (
+            f"{pilot_context}\n\n"
+            f"The document above was generated as part of fulfilling: {original_request}\n"
+            f"This was an intermediate sub-step. Check if there is remaining "
+            f"implementation, testing, or concrete work still needed to complete "
+            f"the original request."
+        )
+
+    @staticmethod
     def _has_actionable_work(agent_responses: dict, phases: list[dict]) -> bool:
         """Return True when the turn produced actionable work worth auto-continuing.
 
@@ -2165,6 +2185,11 @@ class Orchestrator:
                 # Update pilot context for next iteration's decision
                 if self.messages and self.messages[-1]["role"] == "assistant":
                     _pilot_context = self.messages[-1]["content"]
+                    # If the last iteration was a doc export, augment context
+                    # so Haiku doesn't stall on the terse export message
+                    _pilot_context = self._augment_pilot_context_for_export(
+                        _pilot_context, user_input
+                    )
 
             if iteration >= MAX_AUTO_ITERATIONS:
                 console.print(
