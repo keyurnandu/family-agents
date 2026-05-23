@@ -66,7 +66,7 @@ class TestRoleFilesTrimmed:
         mm = MemoryManager(base_dir, "_general")
         personas = config["agent_personas"]
 
-        for role in ("pm", "bsa", "researcher"):
+        for role in ("researcher",):
             persona = personas.get(role, {"name": role})
             agent = Agent(
                 role=role,
@@ -78,5 +78,19 @@ class TestRoleFilesTrimmed:
             prompt = agent._build_system_prompt()
             assert _EXEC_INSTRUCTIONS not in prompt, (
                 f"{role} prompt should NOT contain the shared EXEC instructions block"
+            )
+        # PM and BSA now get EXEC instructions (they write docs via EXEC:file)
+        for role in ("pm", "bsa"):
+            persona = personas.get(role, {"name": role})
+            agent = Agent(
+                role=role,
+                persona=persona,
+                memory=mm,
+                model="sonnet",
+                base_dir=base_dir,
+            )
+            prompt = agent._build_system_prompt()
+            assert _EXEC_INSTRUCTIONS in prompt, (
+                f"{role} prompt SHOULD contain EXEC instructions (they write docs)"
             )
         db.close()

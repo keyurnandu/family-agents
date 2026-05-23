@@ -45,7 +45,7 @@ _ROLE_MEMORY_CATEGORIES: dict[str, set[str]] = {
     "devops":     {"note", "decision", "technical"},
 }
 
-_IMPL_ROLES = {"developer", "lead", "qa", "devops"}
+_IMPL_ROLES = {"pm", "bsa", "developer", "lead", "qa", "devops"}
 
 # ── Auto-expand truncated project docs ───────────────────────────────
 # When a doc is truncated in the system prompt (to save tokens), this
