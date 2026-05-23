@@ -431,7 +431,7 @@ def prompt_and_execute(
                     # Show last 20 lines of output — enough for the agent to diagnose
                     lines = output.splitlines()
                     snippet = "\n".join(lines[-20:]) if len(lines) > 20 else output
-                    console.print(f"[dim red]{snippet}[/dim red]\n")
+                    console.print(Text(snippet + "\n", style="dim red"))
                     outcomes.append(f"HEALTH_CHECK: FAILED\n{snippet}")
         else:
             console.print("  [dim]Changes skipped.[/dim]\n")
@@ -496,9 +496,12 @@ def prompt_and_execute(
 
             output = (result.stdout + result.stderr).strip()
 
-            # Print the captured output so the user still sees it
+            # Print the captured output so the user still sees it.
+            # Use markup=False to prevent Rich from parsing bracket
+            # patterns in subprocess output (e.g. "[/raise/not-found]")
+            # as Rich markup tags, which would crash the CLI.
             if output:
-                console.print(output)
+                console.print(output, markup=False, highlight=False)
                 console.print()
 
             if result.returncode == 0:

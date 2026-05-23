@@ -1191,3 +1191,68 @@ class TestProjectSandbox:
         assert "project directory" in _EXEC_INSTRUCTIONS.lower() or \
                "sandbox" in _EXEC_INSTRUCTIONS.lower() or \
                "outside" in _EXEC_INSTRUCTIONS.lower()
+
+
+# ── Rich markup safety — raw subprocess output must not crash ───────
+
+class TestRichMarkupSafety:
+    """Subprocess output containing bracket patterns like [/raise/not-found]
+    must not crash console.print() via Rich's markup parser."""
+
+    def test_health_check_output_with_rich_brackets_no_crash(self, tmp_path):
+        """Health-check snippet with Rich-like closing tags should not raise MarkupError."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        # Output that mimics pytest failures containing bracket patterns
+        poison_output = (
+            "FAILED tests/test_example.py::test_it - "
+            "raise ValueError('[/raise/not-found]')\n"
+            "short test summary info\n"
+            "1 failed in 0.42s"
+        )
+        action = Action(kind="file", label="src/app.py",
+                        content="print('hello')", agent_name="Sam")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        # Health check returns failure with poisoned output
+        with patch("utils.action_executor.run_health_check",
+                   return_value=(False, poison_output)):
+            outcomes = prompt_and_execute(
+                [action], project,
+                tdd_health_cmd="pytest",
+                auto_mode=True,
+            )
+
+        # Should NOT crash — outcome must contain the snippet
+        assert any("HEALTH_CHECK: FAILED" in o for o in outcomes)
+        assert any("[/raise/not-found]" in o for o in outcomes)
+
+    def test_bash_output_with_rich_brackets_no_crash(self, tmp_path):
+        """Bash command output containing Rich-like tags should not raise MarkupError."""
+        from utils.action_executor import Action, prompt_and_execute
+
+        poison_output = (
+            "ERROR: [bold red]not a real tag[/bold red]\n"
+            "[/some/fake/closing] bracket noise\n"
+            "done"
+        )
+        action = Action(kind="bash", label="pytest tests/",
+                        content="pytest tests/", agent_name="Sam")
+        project = tmp_path / "proj"
+        project.mkdir()
+
+        fake_result = MagicMock()
+        fake_result.stdout = poison_output
+        fake_result.stderr = ""
+        fake_result.returncode = 0
+
+        with patch("utils.action_executor.subprocess.run", return_value=fake_result), \
+             patch("utils.action_executor.is_path_escape_bash", return_value=False):
+            outcomes = prompt_and_execute(
+                [action], project,
+                auto_mode=True,
+            )
+
+        # Should NOT crash
+        assert any("BASH OK" in o for o in outcomes)
