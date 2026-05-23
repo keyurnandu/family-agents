@@ -1262,32 +1262,20 @@ class Orchestrator:
             return _STOP
 
         # Guard 2: failure exit — stop if the last iteration had unresolved
-        # failures.  If the agent already retried and the retry succeeded,
-        # the response contains "RETRY OUTCOMES:" whose entries start with
-        # "BASH OK" / "HEALTH_CHECK: PASSED".  In that case the failure was
-        # self-healed and auto-pilot should continue.
+        # failures with NO evidence of progress.  The agent is "making
+        # progress" when the response also contains successful outcomes
+        # (FILE WRITTEN, BASH OK, HEALTH_CHECK: PASSED) — either in the
+        # primary ACTIONS TAKEN or in RETRY OUTCOMES.  In that case the
+        # agent is actively fixing things and auto-pilot should let it
+        # continue (Haiku decides the next step).
         has_failure = any(m in final_response for m in self._FAILURE_MARKERS)
         if has_failure:
-            retry_resolved = False
-            if "RETRY OUTCOMES:" in final_response:
-                retry_section = final_response.split("RETRY OUTCOMES:", 1)[1]
-                retry_lines = [
-                    ln.strip() for ln in retry_section.splitlines() if ln.strip()
-                ]
-                has_success = any(
-                    ln.startswith("BASH OK") or ln.startswith("HEALTH_CHECK: PASSED")
-                    or ln.startswith("FILE WRITTEN")
-                    for ln in retry_lines
-                )
-                has_retry_failure = any(
-                    ln.startswith("BASH FAILED") or ln.startswith("HEALTH_CHECK: FAILED")
-                    for ln in retry_lines
-                )
-                retry_resolved = has_success and not has_retry_failure
-            if not retry_resolved:
+            _SUCCESS_MARKERS = ("BASH OK", "HEALTH_CHECK: PASSED", "FILE WRITTEN")
+            has_progress = any(m in final_response for m in _SUCCESS_MARKERS)
+            if not has_progress:
                 console.print(
                     "[yellow]  ⚠ Auto-pilot stopping — "
-                    "failure detected in last iteration[/yellow]"
+                    "failure detected with no progress[/yellow]"
                 )
                 return _STOP
 

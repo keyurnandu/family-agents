@@ -347,6 +347,82 @@ class TestAutoPilotSafetyGuards:
         )
         assert result["continue"] is False
 
+    def test_failure_exit_continues_when_agent_wrote_fixes(self, base_dir, config):
+        """Auto-pilot should continue when failures exist but agent wrote fix files."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "Looking at the failures:\n"
+            "- test_runner_state.py — all fail because RunnerFactory.create() doesn't exist\n\n"
+            "ACTIONS TAKEN:\n"
+            "HEALTH_CHECK: FAILED\n3 failed, 12 passed\n"
+            "FILE WRITTEN: app/services/runner/base_runner.py\n"
+            "FILE WRITTEN: app/services/runner/factory.py"
+        )
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "Fix the remaining test"}
+            result = orch._auto_pilot_decide(
+                user_input="fix the test failures",
+                final_response=response,
+                iteration=0,
+            )
+        assert result["continue"] is True
+
+    def test_failure_exit_continues_when_bash_ok_coexists(self, base_dir, config):
+        """Auto-pilot should continue when failures coexist with successful commands."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "BASH OK: pip install missing-dep\nOUTPUT:\nInstalled successfully\n"
+            "HEALTH_CHECK: FAILED\n1 failed, 24 passed"
+        )
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "Fix remaining failure"}
+            result = orch._auto_pilot_decide(
+                user_input="fix the tests",
+                final_response=response,
+                iteration=0,
+            )
+        assert result["continue"] is True
+
+    def test_failure_exit_stops_on_pure_failure_no_progress(self, base_dir, config):
+        """Auto-pilot should stop when only failures exist with no successful work."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "BASH FAILED (exit 1): npm test\nOUTPUT:\nAll 15 tests failed\n"
+            "HEALTH_CHECK: FAILED\n0 passed, 15 failed"
+        )
+
+        result = orch._auto_pilot_decide(
+            user_input="run the tests",
+            final_response=response,
+            iteration=0,
+        )
+        assert result["continue"] is False
+
     def test_duplicate_detection_stops_on_repeated_message(self, base_dir, config):
         """Auto-pilot should stop if next_message is too similar to a previous one."""
         from orchestrator import Orchestrator

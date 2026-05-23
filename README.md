@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-154 tests should pass in under 4 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+157 tests should pass in under 4 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -319,7 +319,7 @@ Auto-pilot has three built-in guards that prevent getting stuck:
 
 | Guard | What it does |
 |---|---|
-| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the agent already self-healed via retry (RETRY OUTCOMES contains a success marker and no new failures) |
+| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
 | **Hard cap** | After 5 iterations, always pauses for your input regardless of what Aria decides |
 
@@ -755,7 +755,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 154 tests — all TDD, run with `pytest`
+├── tests/                    # 157 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
