@@ -1485,3 +1485,202 @@ class TestDocAutoExpand:
         result = _expand_truncated_docs(prompt, "what's in the sprint plan?", reader)
         assert "DOC_TRUNCATED" not in result
         assert "Full sprint plan" in result
+
+
+# ── parse_actions: EXEC block extraction ───────────────────────────────
+
+class TestParseActionsCodeFences:
+    """Ensure EXEC:file blocks with internal triple-backtick code fences
+    are captured in full — not silently truncated at the first ```."""
+
+    def test_simple_file_no_internal_fences(self):
+        """Basic case — file content with no internal code fences."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "Here's the file:\n"
+            "EXEC:file:hello.py\n"
+            "```python\n"
+            "print('hello')\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "sam")
+        assert len(actions) == 1
+        assert actions[0].kind == "file"
+        assert actions[0].label == "hello.py"
+        assert "print('hello')" in actions[0].content
+
+    def test_file_with_internal_code_fences(self):
+        """File content containing markdown code blocks must not be truncated."""
+        from utils.action_executor import parse_actions
+
+        md_content = (
+            "# Architecture\n"
+            "\n"
+            "## Folder Structure\n"
+            "\n"
+            "```\n"
+            "backend/\n"
+            "├── main.py\n"
+            "└── models.py\n"
+            "```\n"
+            "\n"
+            "## Config\n"
+            "\n"
+            "```\n"
+            "DATABASE_URL=sqlite:///./db.sqlite\n"
+            "```\n"
+            "\n"
+            "## Done"
+        )
+        text = (
+            "EXEC:file:docs/architecture.md\n"
+            "```\n"
+            f"{md_content}\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "jordan")
+        assert len(actions) == 1
+        assert actions[0].label == "docs/architecture.md"
+        # The critical assertions — content AFTER the internal fences must survive
+        assert "## Config" in actions[0].content
+        assert "DATABASE_URL" in actions[0].content
+        assert "## Done" in actions[0].content
+
+    def test_file_with_language_tagged_fences(self):
+        """Internal fences with language tags (```python, ```json) must not truncate."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:file:README.md\n"
+            "```\n"
+            "# README\n"
+            "\n"
+            "```python\n"
+            "import os\n"
+            "```\n"
+            "\n"
+            "```json\n"
+            '{"key": "value"}\n'
+            "```\n"
+            "\n"
+            "End of README\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "sam")
+        assert len(actions) == 1
+        assert "End of README" in actions[0].content
+        assert '{"key": "value"}' in actions[0].content
+
+    def test_multiple_exec_blocks_with_fences(self):
+        """Two EXEC:file blocks — each containing internal code fences."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:file:docs/arch.md\n"
+            "```\n"
+            "# Arch\n"
+            "```\n"
+            "folder/\n"
+            "```\n"
+            "End arch\n"
+            "```\n"
+            "\n"
+            "EXEC:file:docs/api.md\n"
+            "```\n"
+            "# API\n"
+            "```json\n"
+            '{"endpoint": "/v1"}\n'
+            "```\n"
+            "End API\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "jordan")
+        assert len(actions) == 2
+        assert "End arch" in actions[0].content
+        assert "End API" in actions[1].content
+        assert '{"endpoint": "/v1"}' in actions[1].content
+
+    def test_bash_simple(self):
+        """Basic EXEC:bash extraction still works."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:bash\n"
+            "```\n"
+            "pytest tests/\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "sam")
+        assert len(actions) == 1
+        assert actions[0].kind == "bash"
+        assert "pytest" in actions[0].content
+
+    def test_mixed_file_and_bash(self):
+        """EXEC:file with fences followed by EXEC:bash."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:file:docs/setup.md\n"
+            "```\n"
+            "# Setup\n"
+            "```bash\n"
+            "pip install -r requirements.txt\n"
+            "```\n"
+            "Done\n"
+            "```\n"
+            "\n"
+            "EXEC:bash\n"
+            "```\n"
+            "pip install -r requirements.txt\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "sam")
+        assert len(actions) == 2
+        assert actions[0].kind == "file"
+        assert "Done" in actions[0].content
+        assert actions[1].kind == "bash"
+        assert "pip install" in actions[1].content
+
+    def test_path_strips_trailing_stars(self):
+        """Bold markdown leaking into EXEC:file path (e.g. 'file.md**') must be cleaned."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:file:docs/roadmap.md**\n"
+            "```\n"
+            "# Roadmap\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "alex")
+        assert len(actions) == 1
+        assert actions[0].label == "docs/roadmap.md"
+        assert "*" not in actions[0].label
+
+    def test_path_strips_backticks(self):
+        """Backtick-wrapped paths like `path/to/file.py` must be cleaned."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            "EXEC:file:`src/main.py`\n"
+            "```python\n"
+            "print('hi')\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "sam")
+        assert len(actions) == 1
+        assert actions[0].label == "src/main.py"
+
+    def test_path_strips_quotes(self):
+        """Quoted paths must be cleaned."""
+        from utils.action_executor import parse_actions
+
+        text = (
+            'EXEC:file:"docs/notes.md"\n'
+            "```\n"
+            "Notes here\n"
+            "```\n"
+        )
+        actions = parse_actions(text, "morgan")
+        assert len(actions) == 1
+        assert actions[0].label == "docs/notes.md"

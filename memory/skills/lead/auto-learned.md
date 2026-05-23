@@ -133,3 +133,30 @@ Before running pytest against tests/test_auth.py, tests/test_database.py, and te
 
 ### [2026-05-23 08:21] via lesson
 Never debug individual test assertions when all tests in a file error identically—it's always a setup/fixture issue. Before investigating test logic, verify that required input files (like the OpenAPI spec) exist and are accessible to the test.
+
+### [2026-05-23 09:37] via lesson
+Never use `tee` or Unix-specific piped commands in Windows cmd without WSL, Git Bash, or PowerShell; always verify your shell environment before running piped bash commands on Windows systems.
+
+### [2026-05-23 09:55] via lesson
+Before merging code that adds new model schemas, always run `uv run pytest tests/test_sc3_openapi_runner_contract.py` to catch missing OpenAPI definitions. The `RunSummary` schema exists in code but not in the generated OpenAPI spec—contract tests are your early warning system.
+
+### [2026-05-23 10:09] via lesson
+Before committing schema changes, always run `pytest test_sc3_openapi_runner_contract.py` to verify that all schema references in code match those defined in the OpenAPI spec. Missing schema definitions (like `RunSummary` here) create contract mismatches that fail multiple tests.
+
+### [2026-05-23 10:32] via lesson
+Always regenerate your OpenAPI spec from schema definitions before running contract tests (e.g., `pytest tests/test_sc3_openapi_runner_contract.py`) to ensure all schema classes like RunSummary are included.
+
+### [2026-05-23 12:34] via lesson
+Before running `uv run pytest` on Windows, move projects off OneDrive paths with spaces (like `OneDrive - Adobe`) to a local path without spaces to avoid `.dist-info` removal access denied errors during environment build.
+
+### [2026-05-23 12:59] via lesson
+Always verify the project directory structure matches the package name in `pyproject.toml` before running `uv sync` — the build system needs a directory matching the project name (e.g., `doc_reader_backend/` directory for project `doc_reader_backend`).
+
+### [2026-05-23 13:00] via lesson
+Never run `uv` commands on projects stored in cloud-synced directories (OneDrive, Google Drive, etc.)—these lock files during background sync, preventing venv cleanup; move the project to a local directory first.
+
+### [2026-05-23 13:20] via lesson
+Never use `type` for file operations — it's for inspecting commands. Use `ls`, `test`, or `[ -f filename ]` to verify files exist instead.
+
+### [2026-05-23 13:22] via lesson
+Always register custom pytest marks in `pytest.ini` or `pyproject.toml` before running tests with `-m performance` (or any other custom marker) to avoid PytestUnknownMarkWarning and test selection failures. Register them under the `[tool.pytest.ini_options]` markers section with: `markers = ["performance", "isolation", "cleanup", "browser"]`.

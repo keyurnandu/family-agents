@@ -161,13 +161,13 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         file_match = re.match(
             r"EXEC:file:([^\n]+)\n"
             r"```[^\n]*\n"
-            r"(.*?)"
-            r"```",
+            r"(.*)"          # greedy — stops at the LAST ``` in the chunk
+            r"\n```",        # so internal code fences are captured, not treated as end
             chunk,
             re.IGNORECASE | re.DOTALL,
         )
         if file_match:
-            path = file_match.group(1).strip()
+            path = file_match.group(1).strip().strip("*`'\"")
             content = file_match.group(2).strip()
             if content:
                 actions.append(Action(kind="file", label=path, content=content, agent_name=agent_name))
@@ -176,8 +176,8 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         bash_match = re.match(
             r"EXEC:bash\s*\n"
             r"```[^\n]*\n"
-            r"(.*?)"
-            r"```",
+            r"(.*)"          # greedy — same fix as file blocks
+            r"\n```",
             chunk,
             re.IGNORECASE | re.DOTALL,
         )

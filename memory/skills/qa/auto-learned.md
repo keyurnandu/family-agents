@@ -67,3 +67,15 @@ Before running `git commit`, always stage changes first with `git add -A` or use
 
 ### [2026-05-23 05:37] via lesson
 Always run `git add` to stage files before `git commit`; untracked or unstaged changes won't be included without explicit staging.
+
+### [2026-05-23 12:39] via lesson
+Before running pytest, verify all app module imports work by testing them directly (e.g., `python -c 'import app.core.database'`), since conftest setup failures often mask unresolved import errors in the application code itself. This catches missing exports or circular dependencies before wasting time debugging test runner errors.
+
+### [2026-05-23 13:18] via lesson
+Always verify that concrete runner implementations (SeleniumRunner, PlaywrightRunner) implement all abstract methods from BaseRunner before running `test_phase5_integration_edge_cases.py`. Check that `SeleniumRunner.run()` is implemented, not just declared as abstract.
+
+### [2026-05-23 13:23] via lesson
+Before running the full test suite, verify the OpenAPI contract implementation is complete—specifically that RunnerType enum and runner field are defined on all required response types (TriggerRunResponse, RunStatusResponse, RunSummary). The 78 errors indicate missing schema implementation rather than logic bugs.
+
+### [2026-05-23 13:30] via lesson
+Always verify that Settings class in app/core/config.py defines all fields referenced in tests before running pytest — APP_VERSION was missing, causing AttributeError. Check app/core/config.py first when tests fail with "'Settings' object has no attribute" errors.

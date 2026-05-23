@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-202 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+211 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -762,7 +762,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 202 tests — all TDD, run with `pytest`
+├── tests/                    # 211 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
