@@ -1278,9 +1278,10 @@ class Orchestrator:
                     + (f"Project state:\n{state_context}\n\n" if state_context else "")
                     + f"Iteration {iteration + 1} of {MAX_AUTO_ITERATIONS}.\n\n"
                     "Is there a clear, concrete next step the team should do RIGHT NOW "
-                    "to fulfil the original request? Only continue if there is actual "
-                    "implementation or testing work remaining. Stop if the work is complete, "
-                    "if user input is needed, or if the next step is vague.\n\n"
+                    "to fulfil the original request? Continue if there is actionable work "
+                    "remaining — implementation, testing, documentation, planning, or "
+                    "any concrete task the team can execute without user input. "
+                    "Stop only if ALL requested work is complete or user input is needed.\n\n"
                     "Return JSON: {continue: bool, next_message: string}"
                 ),
                 schema={
@@ -1296,8 +1297,9 @@ class Orchestrator:
                 },
                 system_prompt=(
                     "You decide whether an auto-pilot dev team should continue to the next step "
-                    "or pause for user input. Be conservative — only continue when the next step "
-                    "is obvious and concrete. Default to stopping."
+                    "or pause for user input. Continue when there is a clear next step the team "
+                    "can act on. Stop when the original request is fully satisfied or when "
+                    "the user needs to make a decision."
                 ),
                 model="haiku",
             )
