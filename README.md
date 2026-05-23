@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-103 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-mode, destructive command detection) without requiring an LLM connection.
+109 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-mode, destructive command detection, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -310,6 +310,16 @@ You (sonnet): build the auth system with JWT
 ```
 
 Press **Ctrl+C** at any time to interrupt the auto-pilot loop.
+
+### Safety guards
+
+Auto-pilot has three built-in guards that prevent getting stuck:
+
+| Guard | What it does |
+|---|---|
+| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops immediately — failures need human eyes |
+| **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
+| **Hard cap** | After 5 iterations, always pauses for your input regardless of what Aria decides |
 
 ---
 

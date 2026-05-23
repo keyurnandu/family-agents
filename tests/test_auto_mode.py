@@ -154,6 +154,135 @@ class TestAutoApproveMode:
 
 # ── orchestrator: auto-pilot continuation ────────────────────────────
 
+class TestAutoPilotSafetyGuards:
+    """Guards that prevent auto-pilot from getting stuck in a loop."""
+
+    def test_failure_exit_stops_on_bash_failure(self, base_dir, config):
+        """Auto-pilot should stop if the last iteration had a BASH FAILED outcome."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        result = orch._auto_pilot_decide(
+            user_input="build the auth system",
+            final_response="BASH FAILED (exit 1): npm test\nOUTPUT:\nError: Cannot find module",
+            iteration=0,
+        )
+        assert result["continue"] is False
+
+    def test_failure_exit_stops_on_health_check_failure(self, base_dir, config):
+        """Auto-pilot should stop if the last iteration had a HEALTH_CHECK FAILED."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        result = orch._auto_pilot_decide(
+            user_input="implement login",
+            final_response="HEALTH_CHECK: FAILED\nImportError: cannot import name 'foo'",
+            iteration=1,
+        )
+        assert result["continue"] is False
+
+    def test_failure_exit_allows_continue_on_success(self, base_dir, config):
+        """Auto-pilot should NOT stop if the last iteration succeeded."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "Now write tests"}
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="BASH OK: npm install\nAll dependencies installed.",
+                iteration=0,
+            )
+        assert result["continue"] is True
+
+    def test_duplicate_detection_stops_on_repeated_message(self, base_dir, config):
+        """Auto-pilot should stop if next_message is too similar to a previous one."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        previous = ["implement the login page", "write tests for auth"]
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {
+                "continue": True,
+                "next_message": "implement the login page",  # exact duplicate
+            }
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Requirements done.",
+                iteration=1,
+                previous_messages=previous,
+            )
+        assert result["continue"] is False
+
+    def test_duplicate_detection_catches_near_duplicates(self, base_dir, config):
+        """Auto-pilot should catch near-duplicate messages (>80% similar)."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        previous = ["Now implement the login page with JWT authentication"]
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {
+                "continue": True,
+                "next_message": "Implement the login page with JWT authentication now",  # ~80% similar
+            }
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Auth module scaffolded.",
+                iteration=1,
+                previous_messages=previous,
+            )
+        assert result["continue"] is False
+
+    def test_duplicate_detection_allows_genuinely_different(self, base_dir, config):
+        """Auto-pilot should allow genuinely different next steps."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        previous = ["implement the login page"]
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {
+                "continue": True,
+                "next_message": "write unit tests for the registration endpoint",
+            }
+            result = orch._auto_pilot_decide(
+                user_input="build the auth system",
+                final_response="Login page implemented.",
+                iteration=1,
+                previous_messages=previous,
+            )
+        assert result["continue"] is True
+
+
 class TestAutoPilotDecision:
     def test_auto_pilot_returns_continue_or_done(self, base_dir, config):
         """_auto_pilot_decide should return a dict with 'continue' bool."""

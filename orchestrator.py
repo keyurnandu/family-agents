@@ -1170,17 +1170,46 @@ class Orchestrator:
     # Auto-pilot — decide whether to continue without user input
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _message_similarity(a: str, b: str) -> float:
+        """Return 0.0–1.0 similarity ratio between two strings (normalized lowercase)."""
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
+
+    # Failure markers that signal auto-pilot should stop immediately
+    _FAILURE_MARKERS = ("BASH FAILED", "HEALTH_CHECK: FAILED")
+
     def _auto_pilot_decide(
-        self, user_input: str, final_response: str, iteration: int = 0
+        self,
+        user_input: str,
+        final_response: str,
+        iteration: int = 0,
+        previous_messages: list[str] | None = None,
     ) -> dict:
         """
         Ask Haiku whether there is a clear, actionable next step that should
         proceed automatically. Returns {"continue": bool, "next_message": str}.
 
-        Safety: always returns continue=False when iteration >= MAX_AUTO_ITERATIONS.
+        Safety guards (checked BEFORE the Haiku call — zero-cost):
+        1. Hard cap: iteration >= MAX_AUTO_ITERATIONS → stop
+        2. Failure exit: if final_response contains BASH FAILED or
+           HEALTH_CHECK: FAILED → stop immediately (failures need human eyes)
+        3. Duplicate detection: if Haiku's next_message is >80% similar to
+           any previous_messages entry → stop (it's a loop)
         """
+        _STOP = {"continue": False, "next_message": ""}
+
+        # Guard 1: hard iteration cap
         if iteration >= MAX_AUTO_ITERATIONS:
-            return {"continue": False, "next_message": ""}
+            return _STOP
+
+        # Guard 2: failure exit — stop if the last iteration had failures
+        for marker in self._FAILURE_MARKERS:
+            if marker in final_response:
+                console.print(
+                    f"[yellow]  ⚠ Auto-pilot stopping — failure detected in last iteration[/yellow]"
+                )
+                return _STOP
 
         state_context = self._turn_state[:600] if self._turn_state else ""
 
@@ -1215,9 +1244,23 @@ class Orchestrator:
                 ),
                 model="haiku",
             )
-            return result
         except Exception:
-            return {"continue": False, "next_message": ""}
+            return _STOP
+
+        # Guard 3: duplicate detection — catch loops where Haiku keeps
+        # generating the same (or very similar) next step
+        if result.get("continue") and previous_messages:
+            next_msg = result.get("next_message", "").strip()
+            if next_msg:
+                for prev in previous_messages:
+                    if self._message_similarity(next_msg, prev) > 0.80:
+                        console.print(
+                            "[yellow]  ⚠ Auto-pilot stopping — "
+                            "repeated task detected (loop)[/yellow]"
+                        )
+                        return _STOP
+
+        return result
 
     # ------------------------------------------------------------------
     # Auto-retry after lesson — agent fixes its own failure immediately
@@ -2001,13 +2044,18 @@ class Orchestrator:
         # logical step without waiting for user input. Capped at
         # MAX_AUTO_ITERATIONS to prevent runaway loops. Ctrl+C breaks out.
         if self._turn_auto and agent_responses and self.project_name != "_general":
+            from utils.claude_client import get_session_stats
             iteration = 0
+            auto_previous_messages: list[str] = []
+            pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
+
             while iteration < MAX_AUTO_ITERATIONS:
                 try:
                     decision = self._auto_pilot_decide(
                         user_input=user_input,
                         final_response=final_response,
                         iteration=iteration,
+                        previous_messages=auto_previous_messages,
                     )
                 except KeyboardInterrupt:
                     console.print(
@@ -2023,11 +2071,19 @@ class Orchestrator:
                 if not next_msg:
                     break
 
+                auto_previous_messages.append(next_msg)
                 iteration += 1
+
+                # Cost warning: show token burn so user can Ctrl+C early
+                current_tokens = get_session_stats().get("estimated_tokens", 0)
+                tokens_burned = current_tokens - pre_auto_tokens
+                cost_hint = f"  [dim]~{tokens_burned:,} tokens burned in auto-pilot[/dim]" if tokens_burned > 0 else ""
+
                 console.print(
                     f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
                     f"[dim]iteration {iteration}/{MAX_AUTO_ITERATIONS}[/dim]  "
                     f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
+                    f"{cost_hint}"
                 )
 
                 # Re-process with the auto-generated message.
