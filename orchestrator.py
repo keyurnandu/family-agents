@@ -1078,7 +1078,9 @@ class Orchestrator:
             actions = parse_actions(response, p.get("name", role.upper()))
             if actions:
                 write_dir = self.loaded_path if self.loaded_path else project_dir
-                prompt_and_execute(actions, write_dir, normalize_dirs=self._extra_normalize_dirs(project_dir), auto_mode=self._turn_auto)
+                scaffold_outcomes = prompt_and_execute(actions, write_dir, normalize_dirs=self._extra_normalize_dirs(project_dir), auto_mode=self._turn_auto)
+                if scaffold_outcomes:
+                    self._log_failures_from_outcomes(scaffold_outcomes, p.get("name", role.upper()), "scaffold")
 
             self.memory.extract_and_save_memories(response, role)
 
@@ -1353,12 +1355,84 @@ class Orchestrator:
                 "last_context": _pilot_context,
                 "reason": _stop_reason,
             }
+            self._log_autopilot_stop(_stop_reason, user_input)
             console.print(
                 "[dim]  💡 Work may be incomplete. "
                 "Type [bold]continue[/bold] to resume auto-pilot.[/dim]"
             )
         else:
             self._pending_autopilot = None
+
+    # ------------------------------------------------------------------
+    # Failure logging — passive Level 1 (append-only, no agent feedback)
+    # ------------------------------------------------------------------
+
+    # Regex patterns to extract structured info from outcome strings
+    _RE_BASH_FAILED = re.compile(
+        r"BASH FAILED \(exit (\d+)\): (.+?)(?:\nOUTPUT:\n(.*))?$", re.DOTALL
+    )
+    _RE_BASH_TIMEOUT = re.compile(
+        r"BASH FAILED \(timed out after \d+s\): (.+)"
+    )
+    _RE_BASH_BLOCKED = re.compile(r"BASH BLOCKED: (.+)")
+    _RE_FILE_BLOCKED = re.compile(r"FILE BLOCKED: (.+)")
+    _RE_HEALTH_FAIL = re.compile(r"HEALTH_CHECK: FAILED\n?(.*)", re.DOTALL)
+
+    def _log_failures_from_outcomes(
+        self,
+        outcomes: list[str],
+        agent_name: str,
+        user_request: str,
+    ):
+        """Parse outcome strings and log any failures to the DB."""
+        for outcome in outcomes:
+            m = self._RE_BASH_FAILED.match(outcome)
+            if m:
+                self.db.log_failure(
+                    self.project_name, agent_name, "bash_error", "bash",
+                    m.group(2).strip(), int(m.group(1)),
+                    (m.group(3) or "").strip()[:2000], user_request,
+                )
+                continue
+
+            m = self._RE_BASH_TIMEOUT.match(outcome)
+            if m:
+                self.db.log_failure(
+                    self.project_name, agent_name, "bash_timeout", "bash",
+                    m.group(1).strip(), None, "timed out", user_request,
+                )
+                continue
+
+            m = self._RE_BASH_BLOCKED.match(outcome)
+            if m:
+                self.db.log_failure(
+                    self.project_name, agent_name, "bash_blocked", "bash",
+                    m.group(1).strip(), None, "blocked by sandbox", user_request,
+                )
+                continue
+
+            m = self._RE_FILE_BLOCKED.match(outcome)
+            if m:
+                self.db.log_failure(
+                    self.project_name, agent_name, "file_blocked", "file",
+                    m.group(1).strip(), None, "blocked by sandbox", user_request,
+                )
+                continue
+
+            m = self._RE_HEALTH_FAIL.match(outcome)
+            if m:
+                self.db.log_failure(
+                    self.project_name, agent_name, "health_check_fail", "file",
+                    "", None, (m.group(1) or "").strip()[:2000], user_request,
+                )
+                continue
+
+    def _log_autopilot_stop(self, reason: str, user_request: str):
+        """Log an autopilot premature stop as a failure."""
+        self.db.log_failure(
+            self.project_name, "autopilot", f"autopilot_{reason}", "autopilot",
+            "", None, f"Auto-pilot stopped: {reason}", user_request,
+        )
 
     # Failure markers that signal auto-pilot should stop (unless retried successfully)
     _FAILURE_MARKERS = ("BASH FAILED", "HEALTH_CHECK: FAILED")
@@ -1548,6 +1622,8 @@ class Orchestrator:
                 normalize_dirs=normalize_dirs,
                 auto_mode=self._turn_auto,
             )
+            if retry_outcomes:
+                self._log_failures_from_outcomes(retry_outcomes, name, self.last_user_input)
         elif not retry_actions:
             # Agent gave a text-only response — still useful, treat as an outcome note
             retry_outcomes = [f"RETRY NOTE from {name}: {response[:400]}"]
@@ -2140,6 +2216,8 @@ class Orchestrator:
                     )
                     if outcomes:
                         phase_responses[role] += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                        # Log failures for later analysis
+                        self._log_failures_from_outcomes(outcomes, name, user_input)
                         # Auto-extract lessons from failures
                         self._check_outcomes_for_lessons(role, outcomes)
 
@@ -2381,6 +2459,7 @@ class Orchestrator:
             outcomes = prompt_and_execute(actions, write_dir, normalize_dirs=_norm_dirs, auto_mode=self._turn_auto)
             if outcomes:
                 response += "\n\nACTIONS TAKEN:\n" + "\n".join(outcomes)
+                self._log_failures_from_outcomes(outcomes, name, self.last_user_input)
                 self._check_outcomes_for_lessons(role, outcomes)
                 # Auto-retry on failure (same as phase loop)
                 fixable_failures = [
@@ -2763,6 +2842,47 @@ class Orchestrator:
 
     def show_history(self, limit: int = 10):
         self.display.show_history(self.db.load_history(self.project_name, limit=limit))
+
+    def show_failures(self, category: str | None = None, limit: int = 20):
+        """Display recent failures from the failure log."""
+        rows = self.db.get_failures(self.project_name, limit=limit, category=category)
+        if not rows:
+            msg = "[dim]No failures logged"
+            if category:
+                msg += f" for category '{category}'"
+            msg += ".[/dim]"
+            console.print(f"\n{msg}\n")
+            return
+
+        from rich.table import Table
+        table = Table(
+            title="Recent Failures",
+            show_lines=False,
+            padding=(0, 1),
+        )
+        table.add_column("Time", style="dim", no_wrap=True)
+        table.add_column("Agent", style="bold yellow", no_wrap=True)
+        table.add_column("Category", style="cyan", no_wrap=True)
+        table.add_column("Command / File", max_width=40)
+        table.add_column("Error", style="red", max_width=50)
+
+        for row in rows:
+            ts = row["timestamp"]
+            # Shorten timestamp to just date + time
+            if ts and len(ts) > 16:
+                ts = ts[:16]
+            error = (row["error_snippet"] or "")[:80]
+            cmd = (row["command_or_file"] or "")[:40]
+            table.add_row(ts, row["agent_name"], row["category"], cmd, error)
+
+        console.print()
+        console.print(table)
+        console.print(
+            f"\n[dim]{len(rows)} failure{'s' if len(rows) != 1 else ''} shown · "
+            f"filter with [cyan]/failures <category>[/cyan]  "
+            f"(bash_error · bash_timeout · bash_blocked · health_check_fail · "
+            f"file_blocked · autopilot_cap_reached)[/dim]\n"
+        )
 
     def show_project_info(self):
         info = self.db.get_project(self.project_name)

@@ -30,6 +30,23 @@ class DBManager:
                 description TEXT
             )
         """)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_name TEXT NOT NULL,
+                agent_name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                command_or_file TEXT,
+                exit_code INTEGER,
+                error_snippet TEXT,
+                user_request TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_failures_project ON failures(project_name)"
+        )
         self.conn.commit()
 
     def ensure_project(self, project_name: str, description: str = ""):
@@ -84,6 +101,55 @@ class DBManager:
                GROUP BY m.project_name
                ORDER BY last_active DESC"""
         ).fetchall()
+        self.conn.row_factory = None
+        return [dict(r) for r in rows]
+
+    # ── Failure logging ────────────────────────────────────────────────
+
+    def log_failure(
+        self,
+        project_name: str,
+        agent_name: str,
+        category: str,
+        action_type: str,
+        command_or_file: str,
+        exit_code: int | None,
+        error_snippet: str,
+        user_request: str,
+    ):
+        """Record an execution failure for later analysis."""
+        self.conn.execute(
+            """INSERT INTO failures
+               (project_name, agent_name, category, action_type,
+                command_or_file, exit_code, error_snippet, user_request)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (project_name, agent_name, category, action_type,
+             command_or_file, exit_code, error_snippet, user_request),
+        )
+        self.conn.commit()
+
+    def get_failures(
+        self,
+        project_name: str,
+        limit: int = 20,
+        category: str | None = None,
+    ) -> list[dict]:
+        """Retrieve recent failures, newest first. Optionally filter by category."""
+        self.conn.row_factory = sqlite3.Row
+        if category:
+            rows = self.conn.execute(
+                """SELECT * FROM failures
+                   WHERE project_name = ? AND category = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (project_name, category, limit),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """SELECT * FROM failures
+                   WHERE project_name = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (project_name, limit),
+            ).fetchall()
         self.conn.row_factory = None
         return [dict(r) for r in rows]
 

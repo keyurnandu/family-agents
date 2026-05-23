@@ -1256,3 +1256,114 @@ class TestRichMarkupSafety:
 
         # Should NOT crash
         assert any("BASH OK" in o for o in outcomes)
+
+
+# ── Failure logging from orchestrator outcomes ──────────────────────
+
+class TestFailureLoggingFromOutcomes:
+    """Orchestrator should parse outcome strings and log failures to SQLite."""
+
+    def _make_orchestrator(self, base_dir, config):
+        from utils.db_manager import DBManager
+        from utils.display import Display
+        from orchestrator import Orchestrator
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        orch = Orchestrator(
+            project_name="test-proj",
+            base_dir=base_dir,
+            db=db,
+            display=Display(),
+            config=config,
+        )
+        orch.is_new_project = False
+        return orch
+
+    def test_bash_failed_outcome_logged(self, base_dir, config):
+        """BASH FAILED outcomes should be logged with category 'bash_error'."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = [
+            "BASH FAILED (exit 1): pytest tests/\nOUTPUT:\nFAILED test_example.py"
+        ]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="build login")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "bash_error"
+        assert rows[0]["agent_name"] == "Sam"
+        assert "pytest tests/" in rows[0]["command_or_file"]
+
+    def test_bash_timeout_outcome_logged(self, base_dir, config):
+        """BASH FAILED (timed out) outcomes should be logged with category 'bash_timeout'."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = ["BASH FAILED (timed out after 120s): npm run build"]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="deploy")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "bash_timeout"
+
+    def test_bash_blocked_outcome_logged(self, base_dir, config):
+        """BASH BLOCKED outcomes should be logged with category 'bash_blocked'."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = [
+            "BASH BLOCKED: Get-ChildItem C:\\Users — references paths outside the project directory"
+        ]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="scan files")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "bash_blocked"
+
+    def test_health_check_failed_outcome_logged(self, base_dir, config):
+        """HEALTH_CHECK: FAILED outcomes should be logged with category 'health_check_fail'."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = ["HEALTH_CHECK: FAILED\nImportError: cannot import 'app'"]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="fix imports")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "health_check_fail"
+
+    def test_file_blocked_outcome_logged(self, base_dir, config):
+        """FILE BLOCKED outcomes should be logged with category 'file_blocked'."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = ["FILE BLOCKED: ../../etc/passwd — escapes project directory"]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="write config")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "file_blocked"
+
+    def test_success_outcomes_not_logged(self, base_dir, config):
+        """BASH OK, FILE WRITTEN, HEALTH_CHECK: PASSED should NOT be logged."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = [
+            "BASH OK: pytest tests/",
+            "FILE WRITTEN: src/app.py",
+            "HEALTH_CHECK: PASSED",
+            "FILE SKIPPED: README.md",
+            "BASH SKIPPED: npm install",
+        ]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="build app")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 0
+
+    def test_autopilot_premature_stop_logged(self, base_dir, config):
+        """Autopilot premature stops should be logged with category 'autopilot_<reason>'."""
+        orch = self._make_orchestrator(base_dir, config)
+        orch._log_autopilot_stop(reason="cap_reached", user_request="build full app")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 1
+        assert rows[0]["category"] == "autopilot_cap_reached"
+        assert rows[0]["agent_name"] == "autopilot"
+
+    def test_multiple_failures_in_one_batch(self, base_dir, config):
+        """Multiple failures in one outcome batch should all be logged."""
+        orch = self._make_orchestrator(base_dir, config)
+        outcomes = [
+            "BASH FAILED (exit 1): cmd1\nOUTPUT:\nerr1",
+            "BASH OK: cmd2",
+            "HEALTH_CHECK: FAILED\nsome error",
+            "FILE BLOCKED: ../../bad — escapes project directory",
+        ]
+        orch._log_failures_from_outcomes(outcomes, agent_name="Sam", user_request="do stuff")
+        rows = orch.db.get_failures("test-proj")
+        assert len(rows) == 3
+        categories = {r["category"] for r in rows}
+        assert categories == {"bash_error", "health_check_fail", "file_blocked"}

@@ -314,6 +314,7 @@ class Display:
             "  [cyan]/load <path>[/cyan]       Load an existing codebase for review or editing\n"
             "  [cyan]/unload[/cyan]            Unload the current codebase\n"
             "  [cyan]/model [alias][/cyan]     Show or change model  (haiku · sonnet · opus)\n"
+            "  [cyan]/failures [category][/cyan] Show recent execution failures (filterable by category)\n"
             "  [cyan]/status[/cyan]            Project snapshot — files, memory, tokens, docs, state\n"
             "  [cyan]/state[/cyan]             Show the live project state (what exists, in progress, next steps)\n"
             "  [cyan]/project[/cyan]           Show current project info\n"

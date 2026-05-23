@@ -496,6 +496,10 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd == "/status":
                 orchestrator.show_status()
 
+            elif cmd.startswith("/failures"):
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                orchestrator.show_failures(category=arg if arg else None)
+
             elif cmd == "/state":
                 state = orchestrator._load_project_state()
                 if state.strip():
