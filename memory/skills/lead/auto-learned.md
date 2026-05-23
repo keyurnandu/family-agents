@@ -2,6 +2,9 @@
 
 Lessons captured automatically from failures, corrections, and retrospectives.
 
+### [2026-05-23 22:30] via user-correction
+This is a WINDOWS machine. NEVER use Unix-only commands: bash, bash -c, tail, head, cat, grep, ls, wc, sed, awk, which, chmod, chown. Use Windows equivalents: cmd /c, Get-Content -Tail, Get-Content -TotalCount, type, findstr, dir, Measure-Object, PowerShell, where.exe, icacls.
+
 ### [2026-05-23 22:00] via user-correction
 Local git operations (git add, git commit, git tag, git stash) are fine — they're just local checkpoints. NEVER run git push, git merge, git rebase, git checkout, or git reset --hard without explicit user approval — these publish to remote or can lose uncommitted work.
 
