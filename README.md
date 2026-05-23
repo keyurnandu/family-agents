@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-150 tests should pass in under 2 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+154 tests should pass in under 4 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -319,7 +319,7 @@ Auto-pilot has three built-in guards that prevent getting stuck:
 
 | Guard | What it does |
 |---|---|
-| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops immediately — failures need human eyes |
+| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the agent already self-healed via retry (RETRY OUTCOMES contains a success marker and no new failures) |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
 | **Hard cap** | After 5 iterations, always pauses for your input regardless of what Aria decides |
 
@@ -755,7 +755,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 150 tests — all TDD, run with `pytest`
+├── tests/                    # 154 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -904,7 +904,7 @@ Six intelligence layers run automatically every turn:
 | **Confidence escalation** | If Haiku produces a thin plan for a complex message (single agent, vague task), routing automatically re-runs with Sonnet |
 | **Intent verification** | After agents respond, a heuristic check detects if the user asked for code but only got prose — surfaces a clear warning |
 | **State-aware next steps** | Aria's synthesis reads `state.md` to suggest concrete next actions (e.g. "auth is done → write tests") instead of generic options |
-| **Auto-retry after lesson** | When a bash command or health check fails, the agent learns a lesson AND immediately retries to fix the problem in the same turn — no manual re-send needed |
+| **Auto-retry after lesson** | When a bash command or health check fails, the agent learns a lesson AND immediately retries to fix the problem in the same turn — no manual re-send needed. If the retry succeeds, auto-pilot continues instead of stopping on the stale failure |
 
 ### Routing speed
 

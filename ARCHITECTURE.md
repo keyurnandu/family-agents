@@ -58,7 +58,7 @@ flowchart TD
         SYNTH --> DISP[Display to user\n+ token bar\n% of safe_context_tokens\ndefault 200k]
 
         DISP --> AUTO_CHK{Actionable work?\n_has_actionable_work}
-        AUTO_CHK -->|yes| APILOT[_auto_pilot_decide\nHaiku JSON call\ncontinue? next_message?]
+        AUTO_CHK -->|yes| APILOT[_auto_pilot_decide\nHaiku JSON call\ncontinue? next_message?\nretry-aware: self-healed failures\ndon't trigger failure exit]
         APILOT -->|continue + next_msg| PROCESS
         APILOT -->|done or max 5| STOP((🛑))
         AUTO_CHK -->|no| STOP
@@ -115,6 +115,11 @@ flowchart TD
         APPLY -->|② invalidate cache| EVICT[Evict Agent._prompt_cache\nfor this role\nnext call rebuilds prompt\nwith lesson included]
 
         APPLY -->|③ inject to history| MSG_INJ[Append to self.messages\nLESSON LEARNED by Name\nvisible in conversation immediately\nno restart needed]
+
+        MSG_INJ --> RETRY[_retry_after_lesson\nre-invoke agent with lesson in context\nproduce corrected EXEC: blocks\ncapped at 1 retry per role per phase]
+
+        RETRY -->|success| RETRY_OK[RETRY OUTCOMES:\nBASH OK / FILE WRITTEN\nauto-pilot sees self-heal → continues]
+        RETRY -->|failed again| RETRY_FAIL[RETRY OUTCOMES:\nBASH FAILED\nauto-pilot stops]
     end
 
     %% ─────────────────────────────────────────────
@@ -224,6 +229,6 @@ flowchart TD
 | **Export docs in loaded codebase** | When a codebase is `/load`ed, `export_doc()` writes to `loaded_path/docs/` (not `projects/<name>/docs/`), file list reflects the loaded codebase, and `load_project_docs()` checks both locations (deduped by filename, loaded path takes priority) |
 | **Auto-approve** | `/auto on` auto-approves file writes + safe bash (no interactive prompt); destructive commands (`rm -rf`, `DROP TABLE`, `git push --force`, etc.) matched via `_DESTRUCTIVE_PATTERNS` regex list always require manual confirmation |
 | **Always-on auto-pilot** | After synthesis, `_has_actionable_work()` checks for multi-phase routing or ACTIONS TAKEN in responses — if actionable, `_auto_pilot_decide()` asks Haiku if a concrete next step exists; not gated by `/auto` toggle (that only controls approval); `_turn_auto` temporarily set to False during recursion to prevent nested loops; Ctrl+C breaks out cleanly |
-| **Auto-pilot safety** | Three guards checked before/after each Haiku call: (1) failure exit — `BASH FAILED` or `HEALTH_CHECK: FAILED` in last response → immediate stop (zero-cost string check, no LLM call); (2) duplicate detection — `SequenceMatcher.ratio() > 0.80` against all previous `next_message` strings → stop on loops; (3) hard cap at `MAX_AUTO_ITERATIONS=5` |
+| **Auto-pilot safety** | Three guards checked before/after each Haiku call: (1) failure exit — `BASH FAILED` or `HEALTH_CHECK: FAILED` in last response → stop unless `RETRY OUTCOMES:` section contains a success marker (`BASH OK`/`HEALTH_CHECK: PASSED`/`FILE WRITTEN`) with no new failures (self-healed failures don't block continuation; zero-cost string check, no LLM call); (2) duplicate detection — `SequenceMatcher.ratio() > 0.80` against all previous `next_message` strings → stop on loops; (3) hard cap at `MAX_AUTO_ITERATIONS=5` |
 | **Export-aware auto-pilot** | `_augment_pilot_context_for_export()` detects when the last auto-pilot iteration was a doc export (message starts with `[Generated`) and appends the original user request + "intermediate sub-step" signal — prevents Haiku from stalling after doc generation. Export path also saves rich messages with next-step hints from `_EXPORT_NEXT_HINTS` and calls `_update_project_state` before returning |
-| **Test suite** | 150 pytest tests covering all optimizations — all written TDD (red→green), run in <2s with zero LLM dependencies |
+| **Test suite** | 154 pytest tests covering all optimizations — all written TDD (red→green), run in <4s with zero LLM dependencies |

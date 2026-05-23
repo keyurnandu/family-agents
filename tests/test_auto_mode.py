@@ -192,7 +192,7 @@ class TestAutoPilotSafetyGuards:
     """Guards that prevent auto-pilot from getting stuck in a loop."""
 
     def test_failure_exit_stops_on_bash_failure(self, base_dir, config):
-        """Auto-pilot should stop if the last iteration had a BASH FAILED outcome."""
+        """Auto-pilot should stop if the last iteration had an unresolved BASH FAILED."""
         from orchestrator import Orchestrator
         from utils.db_manager import DBManager
         from utils.display import Display
@@ -209,7 +209,7 @@ class TestAutoPilotSafetyGuards:
         assert result["continue"] is False
 
     def test_failure_exit_stops_on_health_check_failure(self, base_dir, config):
-        """Auto-pilot should stop if the last iteration had a HEALTH_CHECK FAILED."""
+        """Auto-pilot should stop if the last iteration had an unresolved HEALTH_CHECK FAILED."""
         from orchestrator import Orchestrator
         from utils.db_manager import DBManager
         from utils.display import Display
@@ -243,6 +243,109 @@ class TestAutoPilotSafetyGuards:
                 iteration=0,
             )
         assert result["continue"] is True
+
+    def test_failure_exit_continues_when_retry_resolved(self, base_dir, config):
+        """Auto-pilot should continue if BASH FAILED was self-healed by retry."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "BASH FAILED (exit 255)\nOUTPUT:\n"
+            "'tail' is not recognized as an internal or external command\n\n"
+            "RETRY OUTCOMES:\n"
+            "BASH OK: Get-Content log.txt -Tail 20\nOUTPUT:\nServer started on port 3000"
+        )
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "Now run tests"}
+            result = orch._auto_pilot_decide(
+                user_input="build the server",
+                final_response=response,
+                iteration=0,
+            )
+        assert result["continue"] is True
+
+    def test_failure_exit_continues_when_health_check_retry_resolved(self, base_dir, config):
+        """Auto-pilot should continue if HEALTH_CHECK FAILED was self-healed."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "HEALTH_CHECK: FAILED\nImportError: no module named 'foo'\n\n"
+            "RETRY OUTCOMES:\n"
+            "FILE WRITTEN: requirements.txt\n"
+            "BASH OK: pip install foo\nOUTPUT:\nSuccessfully installed foo-1.0\n"
+            "HEALTH_CHECK: PASSED"
+        )
+
+        with patch("orchestrator.call_claude_json") as mock_json:
+            mock_json.return_value = {"continue": True, "next_message": "Continue implementation"}
+            result = orch._auto_pilot_decide(
+                user_input="implement the feature",
+                final_response=response,
+                iteration=0,
+            )
+        assert result["continue"] is True
+
+    def test_failure_exit_stops_when_retry_also_failed(self, base_dir, config):
+        """Auto-pilot should still stop if the retry itself also failed."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "BASH FAILED (exit 1): npm test\nOUTPUT:\nModule not found\n\n"
+            "RETRY OUTCOMES:\n"
+            "BASH FAILED (exit 1): npm test\nOUTPUT:\nStill broken"
+        )
+
+        result = orch._auto_pilot_decide(
+            user_input="build the auth system",
+            final_response=response,
+            iteration=0,
+        )
+        assert result["continue"] is False
+
+    def test_failure_exit_stops_when_retry_has_no_outcomes(self, base_dir, config):
+        """Auto-pilot should stop if retry section exists but is empty (agent gave text only)."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        response = (
+            "ACTIONS TAKEN:\n"
+            "BASH FAILED (exit 255): tail -n 20 log.txt\n\n"
+            "RETRY OUTCOMES:\n"
+            "RETRY NOTE from Sam: I need to use Get-Content instead"
+        )
+
+        result = orch._auto_pilot_decide(
+            user_input="check the logs",
+            final_response=response,
+            iteration=0,
+        )
+        assert result["continue"] is False
 
     def test_duplicate_detection_stops_on_repeated_message(self, base_dir, config):
         """Auto-pilot should stop if next_message is too similar to a previous one."""

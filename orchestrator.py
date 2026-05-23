@@ -1233,7 +1233,7 @@ class Orchestrator:
         from difflib import SequenceMatcher
         return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
 
-    # Failure markers that signal auto-pilot should stop immediately
+    # Failure markers that signal auto-pilot should stop (unless retried successfully)
     _FAILURE_MARKERS = ("BASH FAILED", "HEALTH_CHECK: FAILED")
 
     def _auto_pilot_decide(
@@ -1250,7 +1250,8 @@ class Orchestrator:
         Safety guards (checked BEFORE the Haiku call — zero-cost):
         1. Hard cap: iteration >= MAX_AUTO_ITERATIONS → stop
         2. Failure exit: if final_response contains BASH FAILED or
-           HEALTH_CHECK: FAILED → stop immediately (failures need human eyes)
+           HEALTH_CHECK: FAILED → stop UNLESS RETRY OUTCOMES shows the
+           agent already self-healed (all retry entries are OK/PASSED)
         3. Duplicate detection: if Haiku's next_message is >80% similar to
            any previous_messages entry → stop (it's a loop)
         """
@@ -1260,11 +1261,33 @@ class Orchestrator:
         if iteration >= MAX_AUTO_ITERATIONS:
             return _STOP
 
-        # Guard 2: failure exit — stop if the last iteration had failures
-        for marker in self._FAILURE_MARKERS:
-            if marker in final_response:
+        # Guard 2: failure exit — stop if the last iteration had unresolved
+        # failures.  If the agent already retried and the retry succeeded,
+        # the response contains "RETRY OUTCOMES:" whose entries start with
+        # "BASH OK" / "HEALTH_CHECK: PASSED".  In that case the failure was
+        # self-healed and auto-pilot should continue.
+        has_failure = any(m in final_response for m in self._FAILURE_MARKERS)
+        if has_failure:
+            retry_resolved = False
+            if "RETRY OUTCOMES:" in final_response:
+                retry_section = final_response.split("RETRY OUTCOMES:", 1)[1]
+                retry_lines = [
+                    ln.strip() for ln in retry_section.splitlines() if ln.strip()
+                ]
+                has_success = any(
+                    ln.startswith("BASH OK") or ln.startswith("HEALTH_CHECK: PASSED")
+                    or ln.startswith("FILE WRITTEN")
+                    for ln in retry_lines
+                )
+                has_retry_failure = any(
+                    ln.startswith("BASH FAILED") or ln.startswith("HEALTH_CHECK: FAILED")
+                    for ln in retry_lines
+                )
+                retry_resolved = has_success and not has_retry_failure
+            if not retry_resolved:
                 console.print(
-                    f"[yellow]  ⚠ Auto-pilot stopping — failure detected in last iteration[/yellow]"
+                    "[yellow]  ⚠ Auto-pilot stopping — "
+                    "failure detected in last iteration[/yellow]"
                 )
                 return _STOP
 
