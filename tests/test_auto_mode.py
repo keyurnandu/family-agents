@@ -417,3 +417,26 @@ class TestAlwaysOnAutoPilot:
         )
         # Even without /auto, should NOT ask "what would you like to do next"
         assert "Always close your response with" not in prompt
+
+    def test_single_agent_final_response_not_empty(self, base_dir, config):
+        """When only one agent responds (synthesis skipped), auto-pilot should
+        still receive the agent's response as context — not an empty string."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Simulate the scenario: single agent with ACTIONS TAKEN
+        agent_responses = {
+            "qa": "Running tests.\n\nACTIONS TAKEN:\nBASH OK: pytest\nOUTPUT:\n28 passed"
+        }
+        # Synthesis is skipped for single-agent → final_response stays ""
+        final_response = ""
+
+        # _build_auto_pilot_context should fall back to agent responses
+        pilot_context = orch._build_auto_pilot_context(final_response, agent_responses)
+        assert len(pilot_context) > 0
+        assert "ACTIONS TAKEN:" in pilot_context

@@ -1160,6 +1160,25 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _build_auto_pilot_context(
+        final_response: str, agent_responses: dict
+    ) -> str:
+        """Build context string for auto-pilot decision.
+
+        When synthesis ran (multi-agent), final_response has Aria's summary.
+        When synthesis was skipped (single-agent), final_response is "" —
+        fall back to the raw agent response so auto-pilot has context to
+        decide whether to continue.
+        """
+        if final_response.strip():
+            return final_response
+        if agent_responses:
+            return "\n\n".join(
+                f"[{r}]: {resp}" for r, resp in agent_responses.items()
+            )
+        return ""
+
+    @staticmethod
     def _has_actionable_work(agent_responses: dict, phases: list[dict]) -> bool:
         """Return True when the turn produced actionable work worth auto-continuing.
 
@@ -2053,12 +2072,17 @@ class Orchestrator:
             iteration = 0
             auto_previous_messages: list[str] = []
             pre_auto_tokens = get_session_stats().get("estimated_tokens", 0)
+            # Build context for auto-pilot — falls back to raw agent responses
+            # when synthesis was skipped (single-agent turns)
+            _pilot_context = self._build_auto_pilot_context(
+                final_response, agent_responses
+            )
 
             while iteration < MAX_AUTO_ITERATIONS:
                 try:
                     decision = self._auto_pilot_decide(
                         user_input=user_input,
-                        final_response=final_response,
+                        final_response=_pilot_context,
                         iteration=iteration,
                         previous_messages=auto_previous_messages,
                     )
@@ -2107,9 +2131,9 @@ class Orchestrator:
                 finally:
                     self._turn_auto = saved_auto
 
-                # Update final_response for next iteration's decision
+                # Update pilot context for next iteration's decision
                 if self.messages and self.messages[-1]["role"] == "assistant":
-                    final_response = self.messages[-1]["content"]
+                    _pilot_context = self.messages[-1]["content"]
 
             if iteration >= MAX_AUTO_ITERATIONS:
                 console.print(
