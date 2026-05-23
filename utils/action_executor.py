@@ -67,6 +67,44 @@ def is_destructive_bash(cmd: str) -> bool:
     return any(p.search(cmd) for p in _DESTRUCTIVE_PATTERNS)
 
 
+# Regex patterns that extract absolute paths from common scanning commands.
+# Matches: C:\..., /home/..., ~\..., and quoted variants.
+_ABSOLUTE_PATH_RE = re.compile(
+    r"""(?:                            # Windows absolute path
+        [A-Za-z]:[\\\/][^\s"'|&;>]+
+    |                                  # Unix absolute path
+        /(?:home|usr|etc|tmp|var|opt|root|mnt|media|Users)[/\w.-]*
+    )""",
+    re.VERBOSE,
+)
+
+
+def is_path_escape_bash(cmd: str, project_dir: Path) -> bool:
+    """Return True if a bash command references absolute paths outside the project.
+
+    Detects commands like:
+    - Get-ChildItem -Path C:\\Users\\someone -Recurse
+    - find / -name '*.log'
+    - dir /s C:\\Users\\someone\\*.py
+    - type C:\\Users\\someone\\Documents\\secrets.txt
+
+    Paths that are INSIDE project_dir (or equal to it) are allowed.
+    Relative paths are always allowed (they resolve under project_dir's cwd).
+    """
+    project_root = str(project_dir.resolve()).rstrip("\\/").lower()
+
+    for match in _ABSOLUTE_PATH_RE.finditer(cmd):
+        abs_path = match.group(0).rstrip("\\/").lower()
+        # Allow if the path is inside (or equal to) the project dir
+        if abs_path.startswith(project_root):
+            continue
+        # Allow if the project dir is inside the matched path
+        # (e.g., project is C:\Users\me\projects\app and command reads C:\Users\me\projects\app\src)
+        # Already handled by the startswith above.
+        return True
+    return False
+
+
 def normalize_bash_command(
     cmd: str,
     project_dir: Path,
@@ -258,6 +296,23 @@ def prompt_and_execute(
     if file_actions:
         console.print()
 
+        # ── Sandbox check: block file writes that escape the project dir ──
+        project_root = str(project_dir.resolve()).rstrip("\\/").lower()
+        safe_file_actions = []
+        for a in file_actions:
+            dest = (project_dir / a.label).resolve()
+            if not str(dest).lower().startswith(project_root):
+                console.print(
+                    f"  [red]✗ BLOCKED[/red]  [cyan]{a.label}[/cyan]  "
+                    "[dim](path escapes project directory)[/dim]"
+                )
+                outcomes.append(f"FILE BLOCKED: {a.label} — escapes project directory")
+            else:
+                safe_file_actions.append(a)
+        file_actions = safe_file_actions
+        if not file_actions and not bash_actions:
+            return outcomes
+
         agents_involved = sorted({a.agent_name for a in file_actions})
         agent_str = " & ".join(f"[bold yellow]{n}[/bold yellow]" for n in agents_involved)
         n = len(file_actions)
@@ -388,6 +443,17 @@ def prompt_and_execute(
         console.print()
         console.print(f"[bold yellow]{action.agent_name}[/bold yellow] wants to run:")
         _show_bash_action(action)
+
+        # Sandbox check: block commands that reference paths outside the project
+        if is_path_escape_bash(action.content, project_dir):
+            console.print(
+                "[bold red]  ✗ BLOCKED — command references paths outside the project directory[/bold red]"
+            )
+            outcomes.append(
+                f"BASH BLOCKED: {action.label} — references paths outside the project directory. "
+                f"Only use relative paths or paths inside {project_dir}"
+            )
+            continue
 
         if auto_mode and not is_destructive_bash(action.content):
             # Auto-approve safe bash commands

@@ -58,7 +58,13 @@ _EXEC_INSTRUCTIONS = (
     "The customer will see a preview and approve or deny each action.\n\n"
     "When you need to run tests, **always** use EXEC:bash — never ask the customer "
     "to run them manually. The system captures the full output and feeds it back into "
-    "your context so you can read the results and act on them."
+    "your context so you can read the results and act on them.\n\n"
+    "## Sandbox — stay inside the project directory\n"
+    "All commands and file paths MUST stay within the project directory. NEVER:\n"
+    "- Scan or search outside the project (e.g. `Get-ChildItem C:\\Users -Recurse`)\n"
+    "- Reference absolute paths outside the project in EXEC:bash commands\n"
+    "- Use path traversal (`../../`) to escape the project directory in EXEC:file paths\n"
+    "Commands that reference paths outside the project will be automatically BLOCKED."
 )
 
 

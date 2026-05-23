@@ -1084,3 +1084,110 @@ class TestBashSubprocessTimeout:
         assert len(outcomes) == 1
         assert "BASH FAILED" in outcomes[0]
         assert "timed out" in outcomes[0].lower()
+
+
+# ── Project sandbox: path escape prevention ──────────────────────────
+
+class TestProjectSandbox:
+    """Agents should not escape the project directory."""
+
+    def test_file_write_blocks_path_traversal(self, tmp_path):
+        """File writes with ../ that escape the project dir should be blocked."""
+        from utils.action_executor import prompt_and_execute, Action
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+
+        action = Action(
+            kind="file",
+            content="malicious content",
+            agent_name="Sam",
+            label="../../etc/passwd",
+        )
+
+        outcomes = prompt_and_execute([action], project, auto_mode=True)
+        assert len(outcomes) == 1
+        assert "BLOCKED" in outcomes[0]
+        # The file should NOT have been written
+        assert not (tmp_path / "etc" / "passwd").exists()
+
+    def test_file_write_allows_nested_inside_project(self, tmp_path):
+        """File writes within the project dir (including subdirs) should be allowed."""
+        from utils.action_executor import prompt_and_execute, Action
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+
+        action = Action(
+            kind="file",
+            content="console.log('hello')",
+            agent_name="Sam",
+            label="src/app.js",
+        )
+
+        outcomes = prompt_and_execute([action], project, auto_mode=True)
+        assert len(outcomes) == 1
+        assert "FILE WRITTEN" in outcomes[0]
+        assert (project / "src" / "app.js").exists()
+
+    def test_bash_blocks_scanning_outside_project(self):
+        """Bash commands that scan outside the project directory should be blocked."""
+        from utils.action_executor import is_path_escape_bash
+
+        # Scanning user home recursively
+        assert is_path_escape_bash(
+            r'Get-ChildItem -Path C:\Users\knandu -Recurse -Filter *.py',
+            Path(r"C:\Users\knandu\projects\myapp"),
+        )
+        # Scanning a sibling directory
+        assert is_path_escape_bash(
+            r'Get-ChildItem -Path C:\Users\knandu\Documents -Recurse',
+            Path(r"C:\Users\knandu\projects\myapp"),
+        )
+        # Scanning parent with dir /s
+        assert is_path_escape_bash(
+            r"dir /s C:\Users\knandu\*.py",
+            Path(r"C:\Users\knandu\projects\myapp"),
+        )
+
+    def test_bash_allows_commands_inside_project(self):
+        """Bash commands working within the project should NOT be blocked."""
+        from utils.action_executor import is_path_escape_bash
+
+        project = Path(r"C:\Users\knandu\projects\myapp")
+
+        # Relative paths — always fine
+        assert not is_path_escape_bash("findstr /n foo src\\app.py", project)
+        assert not is_path_escape_bash("pytest tests/ -v", project)
+        assert not is_path_escape_bash("dir /s *.py", project)
+
+        # Absolute path inside the project — fine
+        assert not is_path_escape_bash(
+            r'Get-ChildItem -Path C:\Users\knandu\projects\myapp\src -Recurse',
+            project,
+        )
+
+    def test_bash_blocks_absolute_paths_outside_project(self):
+        """Bash commands referencing absolute paths outside the project should be blocked."""
+        from utils.action_executor import is_path_escape_bash
+
+        project = Path(r"C:\Users\knandu\projects\myapp")
+
+        # Reading a file outside the project
+        assert is_path_escape_bash(
+            r"type C:\Users\knandu\Documents\secrets.txt",
+            project,
+        )
+        # PowerShell scanning outside
+        assert is_path_escape_bash(
+            r'powershell -Command "Get-ChildItem C:\Users\knandu -Recurse"',
+            project,
+        )
+
+    def test_sandbox_instruction_in_agent_prompt(self):
+        """Agent EXEC instructions should include sandbox restriction."""
+        from agents.agent import _EXEC_INSTRUCTIONS
+
+        assert "project directory" in _EXEC_INSTRUCTIONS.lower() or \
+               "sandbox" in _EXEC_INSTRUCTIONS.lower() or \
+               "outside" in _EXEC_INSTRUCTIONS.lower()

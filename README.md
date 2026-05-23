@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-172 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
+178 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards) without requiring an LLM connection.
 
 ---
 
@@ -294,6 +294,7 @@ The token bar turns yellow at 50% and red at 80% — a signal to consider `/clea
 | File writes (EXEC:file) | ⚡ Auto-approved | Prompt (d/y/N) |
 | Safe bash (npm install, pytest, etc.) | ⚡ Auto-approved | Prompt (Allow?) |
 | **Destructive bash** (rm -rf, DROP TABLE, git push --force, etc.) | **Always prompts** | Prompt (Allow?) |
+| **Path escape** (commands/files referencing paths outside the project) | **Blocked** | **Blocked** |
 
 ### Always-on auto-pilot
 
@@ -761,7 +762,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 172 tests — all TDD, run with `pytest`
+├── tests/                    # 178 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
