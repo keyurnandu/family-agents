@@ -313,6 +313,10 @@ class Orchestrator:
         # Set to None when work is complete or user interrupts.
         self._pending_autopilot: dict | None = None
 
+        # Cache key for project-dir auto-scan — avoids rescanning every turn
+        # when no files have changed.  Stores a frozenset of (relpath, mtime).
+        self._project_scan_key: frozenset | None = None
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -1934,13 +1938,24 @@ class Orchestrator:
         # ── Auto-scan project directory when no /loaded codebase exists ──
         # Without this, agents created within family-agents (not /loaded)
         # have ZERO visibility into project files — no folder tree, no
-        # READ_FILE, nothing.  Re-scan each turn so newly written files
-        # become visible immediately.
-        if not self.loaded_path:
+        # READ_FILE, nothing.  Rescans only when the file set changes
+        # (content-hash cache avoids redundant scans during auto-pilot).
+        if not self.loaded_path or self.loaded_path == self.base_dir / "projects" / self.project_name:
             project_dir = self.base_dir / "projects" / self.project_name
-            if project_dir.exists() and any(project_dir.iterdir()):
-                self.loaded_path = project_dir
-                self.codebase_context = self._scan_codebase(project_dir)
+            if project_dir.exists():
+                try:
+                    scan_key = frozenset(
+                        (str(f.relative_to(project_dir)), f.stat().st_mtime_ns)
+                        for f in project_dir.rglob("*")
+                        if f.is_file()
+                        and not any(part in _SCAN_IGNORE for part in f.relative_to(project_dir).parts)
+                    )
+                except (OSError, ValueError):
+                    scan_key = None
+                if scan_key and scan_key != self._project_scan_key:
+                    self.loaded_path = project_dir
+                    self.codebase_context = self._scan_codebase(project_dir)
+                    self._project_scan_key = scan_key
 
         # ── Resume paused auto-pilot ─────────────────────────────────────
         # If auto-pilot was paused (cap, failure, duplicate) and the user
