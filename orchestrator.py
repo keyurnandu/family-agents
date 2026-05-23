@@ -1291,8 +1291,16 @@ class Orchestrator:
                     "Is there a clear, concrete next step the team should do RIGHT NOW "
                     "to fulfil the original request? Continue if there is actionable work "
                     "remaining — implementation, testing, documentation, planning, or "
-                    "any concrete task the team can execute without user input. "
-                    "Stop only if ALL requested work is complete or user input is needed.\n\n"
+                    "any concrete task the team can execute without user input.\n\n"
+                    "IMPORTANT: If the team is asking a procedural or best-practice "
+                    "question (e.g. 'should we split this commit?', 'should we add "
+                    "tests?', 'which approach is better?'), answer it yourself using "
+                    "engineering best practices and continue. Only stop for genuinely "
+                    "ambiguous decisions that require domain knowledge the team cannot "
+                    "infer — like business priorities, product direction, or user "
+                    "preferences. Bias strongly toward continuing.\n\n"
+                    "Stop only if ALL requested work is complete or the user MUST "
+                    "provide information the team truly cannot decide on its own.\n\n"
                     "Return JSON: {continue: bool, next_message: string}"
                 ),
                 schema={
@@ -1308,9 +1316,11 @@ class Orchestrator:
                 },
                 system_prompt=(
                     "You decide whether an auto-pilot dev team should continue to the next step "
-                    "or pause for user input. Continue when there is a clear next step the team "
-                    "can act on. Stop when the original request is fully satisfied or when "
-                    "the user needs to make a decision."
+                    "or pause for user input. Bias STRONGLY toward continuing — the user wants "
+                    "maximum autonomy. If the team asks a procedural question with an obvious "
+                    "best-practice answer, provide that answer as the next_message and continue. "
+                    "Only stop when the original request is fully complete or when the decision "
+                    "genuinely requires the user's personal preference or domain knowledge."
                 ),
                 model="haiku",
             )
