@@ -295,12 +295,50 @@ def _diagnose_timeout(partial_output: str) -> str:
     The vitest ``(0 test)`` case is handled first (before the general hint
     loop) because it extracts the stuck filename for a targeted hint.
     """
+    # ── vitest teardown hang (all files done, no summary) ───────────────
+    # All test files completed successfully (default reporter prints
+    # "✓ src/file (N tests) Xms" per file) but vitest never printed the
+    # "Test Files N passed" final summary.  The process hangs during
+    # shutdown because an open async handle (leaked timer, unclosed server,
+    # or unresolved Promise) is keeping the Node.js event loop alive.
+    # Common root cause: canvas.getContext("2d") called from a real timer
+    # callback (un-awaited act()), leaving render-related timers in the
+    # worker thread after test cleanup runs.
+    # Must be checked BEFORE the verbose check because default-reporter
+    # file-completion lines ("✓ src/... (N tests)") also match the
+    # broad "^\s+✓\s+src/" pattern used in the verbose check below.
+    _teardown_completed = re.findall(
+        r"✓\s+src/__tests__/[\w./-]+\.(?:test|spec)\.[jt]sx?\s+\(\d+ tests?\)",
+        partial_output,
+    )
+    _teardown_failures = bool(re.search(r"[×✗x]\s+src/", partial_output))
+    if (_teardown_completed
+            and not _teardown_failures
+            and "Test Files" not in partial_output
+            and "❯" not in partial_output):
+        n = len(set(_teardown_completed))
+        return (
+            f"Vitest completed {n} test file(s) successfully but never printed "
+            f"the 'Test Files N passed' summary — the process is hanging during "
+            f"teardown. An open async handle (leaked timer, unclosed server, or "
+            f"unresolved Promise) is keeping the Node.js event loop alive after "
+            f"all tests finished. "
+            f"Fix 1 (immediate): add `forceExit: true` to the test block in "
+            f"vite.config.js — forces vitest to exit once all tests pass. "
+            f"Fix 2 (root cause): add a global canvas mock in setupTests.jsx — "
+            f"`HTMLCanvasElement.prototype.getContext = vi.fn(() => ({{...}}))`  "
+            f"— so PDF.js render tasks complete synchronously instead of leaving "
+            f"pending timer callbacks in the worker thread event loop."
+        )
+
     # ── vitest verbose-reporter silent hang ─────────────────────────────
     # With --reporter=verbose vitest streams individual test names (no ❯
     # progress bar).  A file that crashes at load time produces zero output,
     # so the final "Test Files  N passed" summary is never printed.
-    # Detect: verbose ✓ lines exist, but no "Test Files" summary and no ❯.
-    if (re.search(r"^\s+✓\s+src/", partial_output, re.MULTILINE)
+    # Detect: verbose ✓ lines (with ">" suite separator) exist, but no
+    # "Test Files" summary and no ❯.  The ">" distinguishes verbose
+    # per-test lines from default-reporter file-completion lines.
+    if (re.search(r"^\s+✓\s+src/.*>", partial_output, re.MULTILINE)
             and "Test Files" not in partial_output
             and "❯" not in partial_output):
         completed = sorted(set(

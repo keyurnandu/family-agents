@@ -314,6 +314,78 @@ class TestDiagnoseTimeoutVerboseMode:
         assert "verbose" in hint.lower()
 
 
+class TestDiagnoseTimeoutTeardown:
+    """_diagnose_timeout detects vitest teardown hang (all files passed, no summary)."""
+
+    def _make_teardown_output(self, files=None):
+        """Build default-reporter output where all files completed but no summary printed."""
+        files = files or [
+            ("src/__tests__/DocumentSearch.test.jsx", 24, 166),
+            ("src/__tests__/PdfSearch.test.jsx", 20, 184),
+            ("src/__tests__/UploadButton.test.jsx", 26, 202),
+            ("src/__tests__/PdfViewer.test.jsx", 21, 470),
+            ("src/__tests__/App.integration.test.jsx", 31, 693),
+        ]
+        lines = [" RUN  v2.1.9 C:/project/frontend\n\n"]
+        for name, count, ms in files:
+            lines.append(f" ✓ {name} ({count} tests) {ms}ms\n")
+        # No "Test Files  5 passed (5)" summary — that's the hang
+        return "".join(lines)
+
+    def test_teardown_hang_detected(self):
+        """All files passed but no summary triggers the teardown hint."""
+        partial = self._make_teardown_output()
+        hint = _diagnose_timeout(partial)
+        assert hint, "Expected a hint for teardown hang"
+        assert "teardown" in hint.lower() or "summary" in hint.lower() or "forceExit" in hint
+
+    def test_hint_mentions_forceexit(self):
+        """Hint must tell the agent to add forceExit: true."""
+        partial = self._make_teardown_output()
+        hint = _diagnose_timeout(partial)
+        assert "forceExit" in hint
+
+    def test_hint_mentions_canvas_mock(self):
+        """Hint must suggest mocking canvas.getContext as the root cause fix."""
+        partial = self._make_teardown_output()
+        hint = _diagnose_timeout(partial)
+        assert "canvas" in hint.lower() or "getContext" in hint
+
+    def test_no_false_positive_when_summary_present(self):
+        """If 'Test Files' summary IS present, teardown hint must NOT fire."""
+        partial = self._make_teardown_output() + "\n Test Files  5 passed (5)\n Tests  122 passed (122)\n"
+        hint = _diagnose_timeout(partial)
+        assert "teardown" not in hint.lower()
+        assert "forceExit" not in hint
+
+    def test_no_false_positive_with_failures(self):
+        """If any test file failed (× line), teardown hint must NOT fire."""
+        partial = (
+            " RUN  v2.1.9 C:/project/frontend\n"
+            " ✓ src/__tests__/PdfSearch.test.jsx (20 tests) 184ms\n"
+            " × src/__tests__/PdfViewer.test.jsx (3 failed | 18 passed) 312ms\n"
+        )
+        hint = _diagnose_timeout(partial)
+        assert "forceExit" not in hint
+
+    def test_teardown_takes_priority_over_slow_op_fallback(self):
+        """Teardown hint fires instead of the generic slow build fallback."""
+        partial = (
+            self._make_teardown_output()
+            + "installing packages...\n"   # would trigger slow-op fallback
+        )
+        hint = _diagnose_timeout(partial)
+        assert "forceExit" in hint
+        assert "slow build" not in hint.lower()
+
+    def test_single_completed_file_triggers_hint(self):
+        """Even one completed file with no summary is enough to detect teardown hang."""
+        partial = " RUN  v2.1.9 C:/project/frontend\n ✓ src/__tests__/App.integration.test.jsx (31 tests) 693ms\n"
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "forceExit" in hint
+
+
 class TestDiagnoseTimeoutDotMode:
     """_diagnose_timeout detects silent hang when --reporter=dot hides the ❯ bar."""
 

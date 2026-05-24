@@ -58,3 +58,6 @@ Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the
 
 ### [2026-05-24 15:00] via user-correction
 NEVER use `--reporter=dot` OR `--reporter=verbose` for a full `npx vitest run` suite — both suppress the `❯ filename (0 test)` progress indicator that timeout diagnosis relies on to name the stuck file. Without it, a module-load hang produces no diagnostic output: the timeout fires, the generic 'slow build' fallback triggers, and the agent loops forever retrying the same failing command. ALWAYS use the DEFAULT reporter (no `--reporter` flag): `npx vitest run`. Reserve non-default reporters for SINGLE-FILE runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+
+### [2026-05-24 15:30] via user-correction
+When all vitest test files show ✓ but the process hangs with no 'Test Files N passed' summary, the hang is in teardown — an open handle is keeping Node.js alive after tests complete. Always add `forceExit: true` to vite.config.js as the immediate fix. Always add a global `HTMLCanvasElement.prototype.getContext = vi.fn(...)` mock in setupTests.jsx for any project that renders PDF/canvas components — this prevents jsdom "Not implemented" errors and drains pending render task timers cleanly.

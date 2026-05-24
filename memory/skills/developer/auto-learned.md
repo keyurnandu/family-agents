@@ -261,6 +261,9 @@ Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the
 ### [2026-05-24 15:00] via user-correction
 NEVER use `--reporter=dot` OR `--reporter=verbose` for a full `npx vitest run` suite — both suppress the `❯ filename (0 test)` progress indicator that timeout diagnosis relies on to name the stuck file. Without it, a module-load hang produces no diagnostic output: the timeout fires, the generic 'slow build' fallback triggers, and the agent loops forever retrying the same failing command. ALWAYS use the DEFAULT reporter (no `--reporter` flag): `npx vitest run`. Reserve non-default reporters for SINGLE-FILE runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
 
+### [2026-05-24 15:30] via user-correction
+When `npx vitest run` times out AFTER all test files show ✓ (e.g. "5 test files passed" but no 'Test Files N passed' summary prints), the hang is in vitest's TEARDOWN phase — all tests passed but an open async handle is keeping the Node.js event loop alive. Do NOT retry the same command. Fix: (1) Add `forceExit: true` to the `test` block in `vite.config.js` — forces process exit once all tests complete. (2) Root cause: add a global `HTMLCanvasElement.prototype.getContext = vi.fn(...)` mock in `setupTests.jsx` so PDF.js render tasks complete synchronously instead of leaving pending timer callbacks in the worker thread after test cleanup. Pending timers from un-awaited `act()` calls in navigation tests (e.g. click handlers) are the most common cause.
+
 ### [2026-05-24 14:00] via lesson
 Never write markdown formatting into code files. When writing a .jsx, .js, .ts, .py or other code file, include ONLY the code — never the triple-backtick fences (```) or prose lines like "Now run the following:" or "Here is the implementation:". These are valid in a markdown response but are syntax errors when written to a code file. The file write is rejected immediately with FILE REJECTED if markdown artifacts are detected.
 
@@ -269,3 +272,6 @@ Always identify which test file is hanging when `npx vitest run` times out; PdfV
 
 ### [2026-05-24 14:00] via lesson
 Before running `npx vitest run` on full test suites, increase BASH_TIMEOUT_SECONDS beyond 120s or install the `canvas` npm package to prevent bash-level timeout when jsdom's missing canvas context delays test completion.
+
+### [2026-05-24 14:11] via lesson
+Always specify an explicit timeout parameter (e.g., `timeout: 300000`) when running `npx vitest run`, since the default 120-second bash timeout is insufficient for complete test execution. The tests were actually passing but the command was killed before finishing.
