@@ -340,7 +340,7 @@ class TestDiagnoseTimeoutTeardown:
         assert "teardown" in hint.lower() or "summary" in hint.lower() or "forceExit" in hint
 
     def test_hint_mentions_forceexit(self):
-        """Hint must tell the agent to add forceExit: true."""
+        """Hint must mention forceExit (to warn it does NOT fix worker-thread hangs)."""
         partial = self._make_teardown_output()
         hint = _diagnose_timeout(partial)
         assert "forceExit" in hint
