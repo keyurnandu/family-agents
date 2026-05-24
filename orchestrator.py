@@ -13,7 +13,7 @@ from agents.agent import Agent
 from utils.action_executor import parse_actions, prompt_and_execute
 from utils.claude_client import call_claude, call_claude_json
 from utils.db_manager import DBManager
-from utils.display import Display
+from utils.display import Display, _ts
 from utils.memory_manager import MemoryManager
 
 console = Console()
@@ -1415,7 +1415,7 @@ class Orchestrator:
                     # /auto mode: log checkpoint and keep going
                     console.print(
                         f"\n[bold bright_cyan]🔄 Checkpoint[/bold bright_cyan]  "
-                        f"[dim]{iteration} iterations completed — "
+                        f"[dim]{_ts()}  {iteration} iterations completed — "
                         f"no issues detected, continuing…[/dim]"
                     )
                 else:
@@ -1462,7 +1462,7 @@ class Orchestrator:
 
             console.print(
                 f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "
-                f"[dim]iteration {iteration}/{hard_cap}[/dim]  "
+                f"[dim]{_ts()}  iteration {iteration}/{hard_cap}[/dim]  "
                 f"[white]{next_msg[:100]}{'…' if len(next_msg) > 100 else ''}[/white]"
                 f"{cost_hint}"
             )
@@ -2127,8 +2127,8 @@ class Orchestrator:
             pending = self._pending_autopilot
             self._pending_autopilot = None  # cleared; loop will re-set if needed
             console.print(
-                "\n[bold bright_cyan]🤖 Auto-pilot resuming[/bold bright_cyan]  "
-                f"[dim]original: {pending['original_request'][:80]}"
+                f"\n[bold bright_cyan]🤖 Auto-pilot resuming[/bold bright_cyan]  "
+                f"[dim]{_ts()}  original: {pending['original_request'][:80]}"
                 f"{'…' if len(pending['original_request']) > 80 else ''}[/dim]"
             )
             self._run_autopilot_loop(pending["original_request"], pending["last_context"])

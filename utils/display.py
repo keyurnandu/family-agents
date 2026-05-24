@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
@@ -5,6 +7,11 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+
+
+def _ts() -> str:
+    """Return a compact HH:MM:SS timestamp for CLI output."""
+    return datetime.now().strftime("%H:%M:%S")
 
 
 class Display:
@@ -26,14 +33,14 @@ class Display:
 
     def show_agent_response(self, name: str, response: str, color: str, emoji: str):
         console.print()
-        console.rule(f"{emoji} [bold {color}]{name}[/bold {color}]", style=color)
+        console.rule(f"{emoji} [bold {color}]{name}[/bold {color}]  [dim]{_ts()}[/dim]", style=color)
         console.print(response)
 
     def show_orchestrator_response(self, response: str):
         if response.strip():
             console.print()
             console.rule(
-                "[bold bright_cyan]🎯 Aria (Coordinator)[/bold bright_cyan]",
+                f"[bold bright_cyan]🎯 Aria (Coordinator)[/bold bright_cyan]  [dim]{_ts()}[/dim]",
                 style="bright_cyan",
             )
             console.print(response)

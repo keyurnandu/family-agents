@@ -35,6 +35,8 @@ from rich.panel import Panel
 BASH_TIMEOUT_SECONDS = 120
 from rich.prompt import Confirm
 from rich.syntax import Syntax
+
+from utils.display import _ts
 from rich.table import Table
 from rich.text import Text
 
@@ -467,7 +469,7 @@ def prompt_and_execute(
             approved = Confirm.ask("  Allow?", default=False)
 
         if approved:
-            console.print("  [dim]Running…[/dim]\n")
+            console.print(f"  [dim]Running… {_ts()}[/dim]\n")
             # Normalize absolute paths to relative — prevents WinError 206
             # on long OneDrive paths where cmd.exe exceeds MAX_PATH.
             safe_cmd = normalize_bash_command(action.content, project_dir, normalize_dirs)
