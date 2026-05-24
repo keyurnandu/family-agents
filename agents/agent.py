@@ -123,6 +123,11 @@ _EXEC_INSTRUCTIONS = (
     "Run a shell command:\n"
     "```\nEXEC:bash\n```\n<commands>\n```\n\n"
     "The customer will see a preview and approve or deny each action.\n\n"
+    "Rules:\n"
+    "- Explain what you are doing BEFORE each EXEC: block\n"
+    "- Always include the COMPLETE file content, never a partial snippet\n"
+    "- Use relative paths from the project or loaded-codebase root\n"
+    "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions\n\n"
     "When you need to run tests, **always** use EXEC:bash — never ask the customer "
     "to run them manually. The system captures the full output and feeds it back into "
     "your context so you can read the results and act on them.\n\n"
@@ -186,8 +191,13 @@ class Agent:
         )
         # Hash key_files content so edits to loaded files invalidate the cache
         ctx = getattr(self.orchestrator, "codebase_context", {}) if self.orchestrator else {}
+        key_file_parts = []
+        for fname, content in sorted(ctx.get("key_files", {}).items()):
+            text = str(content)
+            content_hash = hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()
+            key_file_parts.append(f"{fname}\0{len(text)}\0{content_hash}")
         key_files_hash = hashlib.md5(
-            str(sorted(ctx.get("key_files", {}).keys())).encode()
+            "\n".join(key_file_parts).encode("utf-8")
         ).hexdigest()[:8]
         raw = f"{self.role}:{self.memory.project_name}:{mem_count}:{skills_mtime:.0f}:{key_files_hash}"
         return hashlib.md5(raw.encode()).hexdigest()[:12]
@@ -207,7 +217,7 @@ class Agent:
         cfg = getattr(self.orchestrator, "config", {}) if self.orchestrator else {}
         max_mem = cfg.get("max_memory_entries", 15)
         max_docs = cfg.get("max_project_docs", 1)
-        max_doc_chars = cfg.get("max_doc_chars", 1500)
+        max_doc_chars = cfg.get("max_doc_chars", 900)
 
         role_memory = self.memory.load_role_memory(self.role)
 
@@ -321,28 +331,6 @@ class Agent:
             "(3-5 bullets) and offer to go deeper on specific parts. Only provide full details "
             "when the user explicitly asks for them (e.g. 'show me all stories in Epic 2').\n"
             "- Keep responses concise. Avoid padding, preamble, and restating what the user said."
-        )
-        sections.append(
-            "## Delivering Files and Commands\n"
-            "Output EXEC: blocks and the system will show the customer a permission prompt "
-            "before anything is executed.\n"
-            "\n"
-            "Write a file:\n"
-            "EXEC:file:path/to/file.ext\n"
-            "```\n"
-            "<full file content>\n"
-            "```\n"
-            "\n"
-            "Run a shell command:\n"
-            "EXEC:bash\n"
-            "```\n"
-            "<commands>\n"
-            "```\n"
-            "\n"
-            "- Explain what you are doing BEFORE each EXEC: block\n"
-            "- Always include the COMPLETE file content, never a partial snippet\n"
-            "- Use relative paths from the project root\n"
-            "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions"
         )
         result = "\n\n".join(sections)
         # Write to cache (keyed without task so it's reusable across calls)

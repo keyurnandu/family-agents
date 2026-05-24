@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-227 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
+236 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
 
 ---
 
@@ -519,7 +519,7 @@ Always scan all files importing from a module before modifying it — fix all ca
 
 As lessons accumulate, files can get bloated with redundant entries. Aria automatically consolidates them:
 
-- **When**: First `process()` call of a session, if an agent's `auto-learned.md` exceeds 3,000 chars and has 10+ lessons
+- **When**: First `process()` call of a session, if an agent's `auto-learned.md` exceeds 1,800 chars and has 6+ lessons
 - **How**: Haiku merges duplicates, drops stale/contradictory entries, compresses to ≤30% of original count
 - **Cooldown**: 7 days — won't re-consolidate if it ran within the last week
 - **Safety**: Timestamped versioned backups (`auto-learned.YYYYMMDD.bak`) — no learnings are ever lost
@@ -786,7 +786,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 227 tests — all TDD, run with `pytest`
+├── tests/                    # 236 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -796,6 +796,7 @@ family-agents/
 │   ├── test_prompt_cache.py  # Cache eviction at cap
 │   ├── test_config_pass.py   # Config pass-through to Orchestrator
 │   ├── test_synthesis.py     # Per-agent response capping
+│   ├── test_token_optimizations.py # Prompt/context token-budget guards
 │   ├── test_memory_dedup.py  # Hash-based dedup, no false positives
 │   ├── test_build_tree.py    # Single-pass file counting
 │   ├── test_state_lock.py    # Threading lock on state updates
@@ -906,17 +907,21 @@ Several optimizations run automatically to keep token usage low:
 |---|---|
 | **Per-turn cache** | Docs, memory, TDD config, and project state loaded once per message — shared across all routing, agent, and synthesis calls |
 | **Routing prompt cache** | Aria's routing prompt rebuilt only when the team roster, memory, TDD state, or project state actually changes — not on every message |
+| **Routing doc-index cache** | The compact docs index is cached by file mtime/size, so repeated routing calls do not re-read unchanged docs |
+| **Routing state summary** | Routing gets only the `## Routing Summary` slice from `state.md` when present, instead of the full project snapshot |
 | **Role-filtered memory** | Each agent only receives memory categories relevant to their domain (PM/BSA skip technical entries; Developer/Lead skip requirement noise) |
 | **Synthesis output trimming** | Large pytest/bash output blocks condensed to a 3-line summary before Aria's synthesis call — saves 500–2000 tokens on code-heavy turns |
 | **Synthesis per-agent cap** | Each agent's response is capped at ~400 tokens (1600 chars) before being fed into synthesis — prevents a single verbose agent from dominating Aria's context |
+| **Synthesis skip guard** | If multiple agents were routed but only one produced substantive content, Aria skips the extra synthesis call |
+| **Compact synthesis constraints** | Aria's synthesis system prompt keeps the safety rules but removes verbose repeated warnings |
 | **Batched lesson extraction** | Multiple failures in one turn produce a single haiku call for all lessons instead of one call per failure |
-| **Codebase content hash** | Agent system prompt cache invalidates correctly when files change on disk, not just when the path changes |
+| **Codebase content hash** | Agent system prompt cache hashes injected key-file contents, so it invalidates when files change on disk, not just when filenames change |
 | **Prompt cache eviction** | `Agent._prompt_cache` capped at 20 entries with LRU eviction — prevents unbounded memory growth across projects |
 | **Persistent DB connection** | Single SQLite connection reused for the session instead of opening/closing per query — eliminates repeated connection overhead |
 | **CLI check cache** | `claude` CLI existence verified once per process, not on every LLM call |
 | **Module-level regexes** | All frequently-used regexes compiled once at module load — not recompiled inside hot methods |
 | **Config pass-through** | `settings.yaml` parsed once at startup and passed to Orchestrator — no redundant YAML re-reads |
-| **Shared EXEC instructions** | The "Executing Actions" prompt section is defined once in code and injected only for implementation roles (developer, lead, qa, devops) — eliminated ~60 lines of duplication across role files |
+| **Shared EXEC instructions** | The "Executing Actions" prompt section is defined once in code and injected for file-writing roles (pm, bsa, developer, lead, qa, devops) — avoids duplicated command-delivery blocks |
 | **Single-pass file count** | `build_tree` counts files during its directory walk instead of a separate `rglob("*")` traversal |
 | **Thread-safe state updates** | Background `_update_project_state` protected by a threading lock — prevents concurrent writes from stomping on each other |
 | **Hash-based memory dedup** | Memory dedup compares full normalized content against parsed entries instead of a fragile 60-char substring check — no false positives on entries sharing a common prefix |
@@ -925,16 +930,16 @@ Several optimizations run automatically to keep token usage low:
 
 ### How Aria routes smarter
 
-Six intelligence layers run automatically every turn:
+Seven intelligence layers run automatically every turn:
 
 | Feature | How it works |
 |---|---|
-| **Project state document** | After every exchange Aria updates `state.md` in the background — what's built, decisions made, what's next. Injected into routing so Aria never re-derives context from scratch |
+| **Project state document** | After every exchange Aria updates `state.md` in the background — including a compact `## Routing Summary` used by routing so Aria never re-derives context from scratch |
 | **Clarification gate** | For large/vague new-build requests with little existing context, Aria asks one focused question before routing — prevents a wasted phase on the wrong interpretation |
 | **Dynamic bench agents** | Aria can pull in `researcher`, `qa`, or `devops` for a phase even if they're not on the active team — no `/add` needed when the task clearly requires their specialty |
 | **Confidence escalation** | If Haiku produces a thin plan for a complex message (single agent, vague task), routing automatically re-runs with Sonnet |
 | **Intent verification** | After agents respond, a heuristic check detects if the user asked for code but only got prose — surfaces a clear warning |
-| **State-aware next steps** | Aria's synthesis reads `state.md` to suggest concrete next actions (e.g. "auth is done → write tests") instead of generic options |
+| **State-aware next steps** | Aria's synthesis reads a compact slice of `state.md` to suggest concrete next actions (e.g. "auth is done → write tests") instead of generic options |
 | **Auto-retry after lesson** | When a bash command or health check fails, the agent learns a lesson AND immediately retries to fix the problem in the same turn — no manual re-send needed. If the retry succeeds, auto-pilot continues instead of stopping on the stale failure |
 
 ### Routing speed
@@ -946,7 +951,7 @@ Aria's routing decision runs on `routing_model` (default: `haiku`) — a separat
 | `routing_model` | `haiku` | Model for Aria's routing call — haiku is ~3× faster than sonnet |
 | `max_routing_memory` | `8` | Memory entries sent to routing — lower = smaller prompt = faster |
 
-Routing also uses a stripped-down system prompt: no full document content (just titles), no role definitions, no codebase tree — only what Aria needs to decide *who* to ask.
+Routing also uses a stripped-down system prompt: no full document content (just cached titles), no full project state when a routing summary exists, no role definitions, no codebase tree — only what Aria needs to decide *who* to ask.
 
 #### New `/state` command
 
@@ -958,6 +963,11 @@ Shows the current `state.md` — a live structured snapshot of the project:
 
 ```
 # Project State
+
+## Routing Summary
+- Auth flow is built
+- Payment integration is in progress
+- Next step is auth test coverage
 
 ## What exists
 - auth/login.py (complete)
@@ -991,7 +1001,7 @@ max_history_messages: 10 # conversation turns loaded when resuming a project
 max_memory_entries: 15   # memory entries injected into agent prompts (full history kept on disk)
 max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)
 max_project_docs: 1      # docs injected into agent prompts (most recent only; full docs on disk)
-max_doc_chars: 1500      # chars per injected doc (say 'show full <doc>.md' to see complete file)
+max_doc_chars: 900       # chars per injected doc (say 'show full <doc>.md' to see complete file)
 max_read_file_chars: 20000  # chars per READ_FILE request; review/audit tasks always get the full file
 
 team:

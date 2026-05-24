@@ -5,7 +5,7 @@ max_history_messages: 10 # conversation turns loaded when resuming a project
 max_memory_entries: 15   # max memory entries injected into agent prompts (full history kept on disk)
 max_routing_memory: 8    # memory entries passed to routing (smaller = faster routing calls)
 max_project_docs: 1      # docs injected into agent prompts (most recent only; full docs on disk)
-max_doc_chars: 1500      # chars per injected doc (truncated; say 'show full <doc>.md' for complete)
+max_doc_chars: 900       # chars per injected doc (truncated; say 'show full <doc>.md' for complete)
 max_read_file_chars: 20000  # chars read per READ_FILE request; review/audit tasks always get full file
 
 team:

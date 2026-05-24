@@ -307,6 +307,8 @@ class Orchestrator:
         # Rebuilt only when something actually changes, not on every message.
         self._routing_prompt_cache: str = ""
         self._routing_prompt_key: str = ""
+        self._routing_doc_index_cache: str = ""
+        self._routing_doc_index_key: str = ""
 
         # Per-turn project state (state.md) — loaded once, used in routing + synthesis
         self._turn_state: str = ""
@@ -531,10 +533,11 @@ class Orchestrator:
                 "- For non-implementation tasks (questions, reviews, planning) use normal routing.\n\n"
             )
 
-        # Project state — inject when available (gives Aria structured awareness)
+        # Project state — inject a compact routing summary when available
         state_section = ""
-        if self._turn_state:
-            state_section = f"## Project State\n{self._turn_state[:1200]}\n\n"
+        routing_state = self._routing_state_summary(self._turn_state)
+        if routing_state:
+            state_section = f"## Project State\n{routing_state[:700]}\n\n"
 
         prompt = (
             f"You are Aria, the project coordinator for '{self.project_name}'. "
@@ -579,15 +582,42 @@ class Orchestrator:
 
     def _routing_doc_index(self) -> str:
         """Return a compact one-line-per-doc index for routing context."""
-        from pathlib import Path
-        docs_dir = self.base_dir / "projects" / self.project_name / "docs"
-        if not docs_dir.exists():
+        docs_dirs = []
+        if self.loaded_path:
+            loaded_docs = self.loaded_path / "docs"
+            if loaded_docs.exists():
+                docs_dirs.append(loaded_docs)
+        internal_docs = self.base_dir / "projects" / self.project_name / "docs"
+        if internal_docs.exists():
+            docs_dirs.append(internal_docs)
+        if not docs_dirs:
+            self._routing_doc_index_cache = ""
+            self._routing_doc_index_key = ""
             return ""
-        files = sorted(docs_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True)
+
+        seen_names: set[str] = set()
+        files = []
+        for docs_dir in docs_dirs:
+            for f in sorted(docs_dir.glob("*.md"), key=lambda f: f.stat().st_mtime, reverse=True):
+                if f.name in seen_names:
+                    continue
+                seen_names.add(f.name)
+                files.append(f)
+        files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
         if not files:
+            self._routing_doc_index_cache = ""
+            self._routing_doc_index_key = ""
             return ""
+
+        indexed = files[:5]
+        cache_key = "|".join(
+            f"{f}:{f.stat().st_mtime_ns}:{f.stat().st_size}" for f in indexed
+        )
+        if cache_key == self._routing_doc_index_key:
+            return self._routing_doc_index_cache
+
         lines = []
-        for f in files[:5]:
+        for f in indexed:
             # Grab first non-empty line of the doc as the summary
             try:
                 first_line = next(
@@ -598,7 +628,35 @@ class Orchestrator:
             except Exception:
                 first_line = ""
             lines.append(f"- {f.name}  {first_line}")
-        return "\n".join(lines)
+        result = "\n".join(lines)
+        self._routing_doc_index_cache = result
+        self._routing_doc_index_key = cache_key
+        return result
+
+    @staticmethod
+    def _routing_state_summary(state_text: str) -> str:
+        """Return the small state slice needed by routing.
+
+        Prefer the explicit ``## Routing Summary`` section. Older state.md files
+        do not have it, so fall back to the first few non-heading lines.
+        """
+        if not state_text or not state_text.strip():
+            return ""
+
+        match = re.search(
+            r"^## Routing Summary\s*\n(.*?)(?=^##\s+|\Z)",
+            state_text,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        if match and match.group(1).strip():
+            return "## Routing Summary\n" + match.group(1).strip()
+
+        lines = [
+            line.strip()
+            for line in state_text.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        return "\n".join(lines[:8])
 
     def _synthesis_system_prompt(self) -> str:
         """System prompt for Aria's synthesis/direct-answer calls.
@@ -622,30 +680,13 @@ class Orchestrator:
 
         constraint = (
             "\n\n## CRITICAL CONSTRAINT\n"
-            "You are running as a TEXT-ONLY agent. "
-            "You have NO access to Write, Edit, Read, Bash, or any file-system tools. "
-            "Do NOT attempt to call any tools. "
-            "Do NOT mention Claude Code, settings.json, .claude folders, or permission dialogs — "
-            "none of that applies here.\n\n"
-            "NEVER output READ_FILE: markers. You cannot read files — only specialist agents "
-            "(Sam, Jordan, Morgan, etc.) can. If files need to be read, your job is to route "
-            "to the appropriate specialist, not to read files yourself.\n\n"
-            "IMPORTANT: Never ask the customer to provide a file path, paste content, or share a "
-            "link to information that is already in your Project Documents section above. "
-            "If a document is in context, use it directly.\n\n"
-            "FILE ERROR RULE — READ THIS CAREFULLY:\n"
-            "NEVER ask the customer whether the codebase is loaded. NEVER suggest they run /load. "
-            "The system handles codebase loading automatically — it is not the customer's problem. "
-            "If agents could not read files, simply say the files weren't available this turn and "
-            "that the team will retry. Do NOT use the words 'sandbox', 'locked', 'session', "
-            "'restricted', 'permission', 'working directory', 'Claude Code session', or "
-            "'has the codebase been loaded'. Those concepts DO NOT EXIST here.\n\n"
-            "When agents include EXEC: file or bash blocks in their responses, those are already "
-            "queued for the customer's approval by the Python harness. "
-            "In your synthesis, simply tell the customer what the team is proposing to write or run — "
-            "do NOT re-explain the mechanism, do NOT ask them to approve anything special. "
-            "Just say e.g. 'Sam and Jordan are ready to write config.py — "
-            "you will be prompted to approve each file.'"
+            "You are text-only: do not call tools, output READ_FILE markers, or mention "
+            "Claude Code internals, settings files, permission dialogs, or work directories. "
+            "Do not mention sandbox, locked sessions, or restricted filesystem access. "
+            "Use project documents already in context instead of asking the customer to paste them. "
+            "If specialists could not read a file, say it was not available this turn and the team will retry. "
+            "If agents proposed EXEC file/bash blocks, summarize the proposed write/run briefly; "
+            "the harness already handles approval."
         )
         return f"{role_memory}{docs_section}{memory_section}{constraint}"
 
@@ -689,6 +730,33 @@ class Orchestrator:
 
     _SYNTHESIS_PER_AGENT_CAP = 1600
 
+    @staticmethod
+    def _should_synthesize(agent_responses: dict, all_file_errors: bool) -> bool:
+        """Return True when an extra Aria synthesis call is worth the tokens."""
+        if all_file_errors or len(agent_responses) <= 1:
+            return False
+
+        low_value_replies = {
+            "ok", "okay", "looks good", "looks good.", "no concerns",
+            "nothing to add", "nothing to add.", "agreed", "agree",
+        }
+
+        substantive = 0
+        for response in agent_responses.values():
+            text = (response or "").strip()
+            if not text:
+                continue
+            lowered = text.lower()
+            if lowered in low_value_replies:
+                continue
+            if "ACTIONS TAKEN:" in text or "EXEC:file:" in text or "EXEC:bash" in text:
+                substantive += 1
+                continue
+            if len(text) >= 40:
+                substantive += 1
+
+        return substantive > 1
+
     def _synthesis_prompt(self, user_input: str, agent_responses: dict) -> str:
         parts = [
             f"The customer said:\n{user_input}\n\n"
@@ -729,7 +797,8 @@ class Orchestrator:
     # ------------------------------------------------------------------
 
     # Consolidation fires when an auto-learned.md exceeds this many chars.
-    _CONSOLIDATION_THRESHOLD = 3000
+    _CONSOLIDATION_THRESHOLD = 1800
+    _CONSOLIDATION_MIN_LESSONS = 6
     # Minimum days between consolidation runs (checked via .bak mtime).
     _CONSOLIDATION_COOLDOWN_DAYS = 7
 
@@ -776,7 +845,7 @@ class Orchestrator:
 
             # Count lessons (### headers)
             lesson_count = content.count("\n### ")
-            if lesson_count < 10:
+            if lesson_count < self._CONSOLIDATION_MIN_LESSONS:
                 continue
 
             persona = self.config["agent_personas"].get(role, {})
@@ -1283,6 +1352,8 @@ class Orchestrator:
                         + "Output a COMPLETE replacement state.md in this EXACT format "
                         "(keep each section to max 5 bullets, be factual and specific):\n\n"
                         "# Project State\n\n"
+                        "## Routing Summary\n"
+                        "(3-5 terse bullets with only facts Aria needs for routing next turn)\n\n"
                         "## What exists\n"
                         "(files/components that are complete)\n\n"
                         "## In progress\n"
@@ -2123,7 +2194,7 @@ class Orchestrator:
         )
         self._turn_docs = self.memory.load_project_docs(
             max_docs=cfg.get("max_project_docs", 1),
-            max_chars_each=cfg.get("max_doc_chars", 1500),
+            max_chars_each=cfg.get("max_doc_chars", 900),
         )
         # Project state — load once, used by routing + synthesis
         self._turn_state = self._load_project_state()
@@ -2526,7 +2597,7 @@ class Orchestrator:
         )
 
         final_response = ""
-        if len(agent_responses) > 1 and not all_file_errors:
+        if self._should_synthesize(agent_responses, all_file_errors):
             with console.status("[bright_cyan]🎯 Aria is synthesizing…[/bright_cyan]", spinner="dots"):
                 synth_prompt = self._synthesis_prompt(user_input, agent_responses)
                 try:

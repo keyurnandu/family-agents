@@ -68,9 +68,9 @@ flowchart TD
     subgraph AGENT_SYS["💻  agents/agent.py  —  Specialist Agents"]
         AG_CALL[agent.call task]
 
-        AG_CALL --> PCACHE{Prompt cache hit?\nkey = role · project\n· mem_count · skills_mtime\n· codebase_hash}
+        AG_CALL --> PCACHE{Prompt cache hit?\nkey = role · project\n· mem_count · skills_mtime\n· key-file content hash}
 
-        PCACHE -->|miss| BUILD_SP[Build system prompt\n① role guide  memory/roles/role.md\n② role-filtered memory\n   PM/BSA → requirements+decisions\n   Dev/Lead → technical+decisions\n③ EXEC instructions for impl roles\n④ skills files  auto-learned.md\n⑤ codebase context if loaded\n⑥ per-turn docs injected]
+        PCACHE -->|miss| BUILD_SP[Build system prompt\n① role guide  memory/roles/role.md\n② role-filtered memory\n   PM/BSA → requirements+decisions\n   Dev/Lead → technical+decisions\n③ EXEC instructions for file-writing roles\n④ skills files  auto-learned.md\n⑤ codebase context if loaded\n⑥ per-turn docs injected]
 
         PCACHE -->|hit| CLAUDE_CALL
 
@@ -133,9 +133,9 @@ flowchart TD
 
         IV[Intent verification\nheuristic: asked for code → got prose?\n→ surface warning to user]
 
-        PS_UPDATE[_update_project_state\nbackground daemon thread + _state_lock\nHaiku writes state.md after every turn\n— what exists · in progress · decisions · next steps]
+        PS_UPDATE[_update_project_state\nbackground daemon thread + _state_lock\nHaiku writes state.md after every turn\n— routing summary · what exists · in progress · decisions · next steps]
 
-        PS_READ[_load_project_state\nread state.md → _turn_state\ninjected into routing prompt + synthesis\nso next turn Aria reasons from facts not inference]
+        PS_READ[_load_project_state\nread state.md → _turn_state\nrouting gets compact summary\nsynthesis gets capped context\nso next turn Aria reasons from facts not inference]
     end
 
     %% ─────────────────────────────────────────────
@@ -202,7 +202,7 @@ flowchart TD
 |---|---|
 | **No SDK / API key** | All LLM calls go through `claude --print` subprocess; prompt via stdin (bypasses 32k Windows cmd limit) |
 | **Parallel execution** | Agents within a phase run in `ThreadPoolExecutor`; phases are sequential so dev always has requirements first |
-| **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash` — rebuilds only when something actually changes; capped at 20 entries with LRU eviction |
+| **Prompt cache** | Class-level `Agent._prompt_cache` keyed by `role·project·mem_count·skills_mtime·codebase_hash`; the codebase hash includes injected key-file contents, so prompts rebuild when files change; capped at 20 entries with LRU eviction |
 | **Per-turn cache** | `_turn_docs`, `_turn_memory`, `_turn_tdd`, `_turn_auto`, `_turn_state` loaded once at the start of `process()` — not re-loaded for every agent call |
 | **Role-filtered memory** | PM/BSA see requirements+decisions; Dev/Lead see technical+decisions — no agent reads irrelevant categories |
 | **Bash output capture** | `capture_output=True` → printed to terminal AND injected into outcomes so agents can reason about test results |
@@ -210,17 +210,19 @@ flowchart TD
 | **Safe context** | Token bar shows `session_tokens / safe_context_tokens` (configurable in `settings.yaml`, default 200k) |
 | **TDD mode** | Health check runs automatically after every approved file write; failure feeds directly into lesson extraction |
 | **Phase summaries** | Split at `ACTIONS TAKEN:` boundary — narrative capped at 800 chars, actions block at 1500 chars — prevents long agent responses from burying action data |
-| **Project state** | `state.md` updated by Haiku in a background thread after every turn (guarded by `_state_lock`) — Aria reads it at turn-start so routing and synthesis reason from a structured snapshot, not raw conversation inference |
+| **Project state** | `state.md` updated by Haiku in a background thread after every turn (guarded by `_state_lock`) — Aria reads it at turn-start; routing receives only the compact `## Routing Summary` when available, while synthesis gets capped state context |
 | **Clarification gate** | Pre-filter (large-build regex + word count + low context) then one Haiku JSON call — asks one question before wasting a phase on the wrong interpretation |
 | **Bench agents** | Routing schema allows any agent; phase executor announces and pulls in bench roles without requiring `/add` — then they return to bench after the phase |
 | **Confidence escalation** | If Haiku routing produces a thin plan (≤1 agent, <60 char task) on a long message, automatically re-runs with Sonnet |
 | **Intent verification** | Heuristic check — user asked for code but agents produced only prose → surface a clear warning with suggested action |
 | **Synthesis per-agent cap** | Each agent response truncated to 1600 chars before synthesis — prevents a single verbose agent from blowing up Aria's context window |
+| **Synthesis skip guard** | `_should_synthesize()` skips the extra Aria synthesis call when only one routed agent produced substantive content and the rest were empty/acknowledgement replies |
+| **Compact synthesis constraints** | `_synthesis_system_prompt()` keeps safety rules in a short constraint paragraph instead of repeating verbose file-access warnings every synthesis call |
 | **Persistent DB connection** | `DBManager` opens one SQLite connection on init and reuses it — no per-query open/close overhead |
 | **CLI check cache** | `claude` binary existence verified once per process via `shutil.which()` — subsequent calls skip the check |
 | **Module-level regexes** | All hot-path regexes (`_CODE_TASK_RE`, `_IMPL_RE`, `_CORRECTION_RE`, etc.) compiled once at module load — zero per-call compilation cost |
 | **Config pass-through** | `settings.yaml` parsed once in `cli.py` and passed as a dict — Orchestrator never re-reads YAML |
-| **Shared EXEC instructions** | The "Executing Actions" prompt block defined once as `_EXEC_INSTRUCTIONS` in `agent.py` — injected only for implementation roles (`developer`, `lead`, `qa`, `devops`); non-impl roles never see it |
+| **Shared EXEC instructions** | The "Executing Actions" prompt block defined once as `_EXEC_INSTRUCTIONS` in `agent.py` — injected for file-writing roles (`pm`, `bsa`, `developer`, `lead`, `qa`, `devops`) and includes the command-delivery rules so prompts do not carry a second duplicate block |
 | **Single-pass file count** | `build_tree()` counts files as it walks the directory tree — no separate `rglob("*")` traversal |
 | **Hash-based memory dedup** | `save_project_memory()` compares full normalized content against parsed entries — replaces fragile `[:60]` substring check that caused false positives |
 | **Bench agent consultation** | `_get_peer_input` allows any instantiated agent to be consulted via `ASK_COLLEAGUE` — including bench agents (researcher, qa, devops) not on the active roster; only truly non-existent roles are rejected |
@@ -235,7 +237,8 @@ flowchart TD
 | **Auto-pilot checkpoint resume** | In normal mode, auto-pilot pauses every `AUTO_CHECKPOINT_INTERVAL` (5) iterations for manual "continue". In `/auto` mode, Aria auto-resets at each checkpoint if no issues are detected (failures, duplicates) and keeps running up to `AUTO_HARD_CEILING` (50) — fully hands-off. When auto-pilot stops prematurely (cap/failure/duplicate), saves `_pending_autopilot` context (original request + last pilot context + stop reason). User types "continue"/"resume"/"go" → `process()` detects this, calls `_run_autopilot_loop()` with the saved context, and the loop picks up where it left off. Ctrl+C does NOT save pending (user chose to stop) |
 | **Export-aware auto-pilot** | `_augment_pilot_context_for_export()` detects when the last auto-pilot iteration was a doc export (message starts with `[Generated`) and appends the original user request + "intermediate sub-step" signal — prevents Haiku from stalling after doc generation. Export path also saves rich messages with next-step hints from `_EXPORT_NEXT_HINTS` and calls `_update_project_state` before returning |
 | **Failure logging** | Passive Level 1 failure log — every execution failure (bash error/timeout/blocked, health check fail, file blocked, autopilot premature stop) is appended to a `failures` SQLite table with timestamp, agent, category, command, error snippet, and user request context. `/failures [category]` command displays recent failures in a Rich table, filterable by category. Zero overhead — just an INSERT per failure, no agent feedback loop (Level 2) |
-| **Auto-expand truncated docs** | Project docs are capped at `max_doc_chars` (1,500) in agent system prompts to control token budget. When a doc is truncated, a `[DOC_TRUNCATED:filename:size]` marker is inserted. Before the LLM call, `_expand_truncated_docs()` checks if the task references a truncated doc (keyword match on filename stem) and replaces it with the full file from disk — zero extra LLM cost. Fallback: if the agent's response still mentions "truncated"/"cut off" without emitting READ_FILE, force-expands all truncated docs and re-calls once |
+| **Auto-expand truncated docs** | Project docs are capped at `max_doc_chars` (900 by default) in agent system prompts to control token budget. When a doc is truncated, a `[DOC_TRUNCATED:filename:size]` marker is inserted. Before the LLM call, `_expand_truncated_docs()` checks if the task references a truncated doc (keyword match on filename stem) and replaces it with the full file from disk — zero extra LLM cost. Fallback: if the agent's response still mentions "truncated"/"cut off" without emitting READ_FILE, force-expands all truncated docs and re-calls once |
+| **Routing doc-index cache** | `_routing_doc_index()` caches the title/first-line docs index by doc path, mtime, and size, avoiding repeated markdown reads across unchanged routing prompts |
 | **Project dir auto-scan** | Projects created within family-agents (not `/load`ed) previously had zero file visibility — agents couldn't see folder trees or use READ_FILE. Now `process()` auto-scans `projects/<name>/` each turn when no external codebase is loaded, setting `loaded_path` and `codebase_context` transiently. Shared `_SCAN_IGNORE` constant filters venv/node_modules from both the folder tree and `_update_project_state` file listing |
-| **Auto skill consolidation** | On the first `process()` call each session, `_consolidate_skills_if_needed()` checks every active agent's `auto-learned.md`. If a file exceeds `_CONSOLIDATION_THRESHOLD` (3,000 chars) and has ≥10 lessons, Haiku merges redundant lessons, drops stale/contradictory ones, and compresses to ≤30% of the original count. 7-day cooldown via `.bak` mtime — skips if last consolidation was within `_CONSOLIDATION_COOLDOWN_DAYS`. Each consolidation writes a timestamped archive (`auto-learned.YYYYMMDD.bak`) alongside the plain `.bak` — no learnings are ever lost. New lessons accumulate between consolidations and are included in the next compression pass. Graceful on failure |
-| **Test suite** | 227 pytest tests covering all optimizations — all written TDD (red→green), run in <7s with zero LLM dependencies |
+| **Auto skill consolidation** | On the first `process()` call each session, `_consolidate_skills_if_needed()` checks every active agent's `auto-learned.md`. If a file exceeds `_CONSOLIDATION_THRESHOLD` (1,800 chars) and has at least `_CONSOLIDATION_MIN_LESSONS` (6) lessons, Haiku merges redundant lessons, drops stale/contradictory ones, and compresses to ≤30% of the original count. 7-day cooldown via `.bak` mtime — skips if last consolidation was within `_CONSOLIDATION_COOLDOWN_DAYS`. Each consolidation writes a timestamped archive (`auto-learned.YYYYMMDD.bak`) alongside the plain `.bak` — no learnings are ever lost. New lessons accumulate between consolidations and are included in the next compression pass. Graceful on failure |
+| **Test suite** | 236 pytest tests covering all optimizations — all written TDD (red→green), run with zero LLM dependencies |
