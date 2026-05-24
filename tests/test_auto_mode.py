@@ -1154,21 +1154,22 @@ class TestAutoPilotResume:
 class TestBashSubprocessTimeout:
     """Bash command execution should have a timeout to prevent hanging."""
 
-    def test_subprocess_run_has_timeout(self):
-        """The subprocess.run call in prompt_and_execute should include a timeout."""
+    def test_streaming_runner_enforces_timeout(self):
+        """_run_bash_streaming must exist and use BASH_TIMEOUT_SECONDS."""
         import inspect
-        from utils.action_executor import prompt_and_execute
+        from utils.action_executor import _run_bash_streaming, BASH_TIMEOUT_SECONDS
 
-        source = inspect.getsource(prompt_and_execute)
-        # The subprocess.run call must include timeout parameter
-        assert "timeout=" in source, (
-            "subprocess.run in prompt_and_execute must have a timeout parameter "
-            "to prevent hanging on Windows"
-        )
+        # Verify the timeout constant is a sensible ceiling
+        assert isinstance(BASH_TIMEOUT_SECONDS, int)
+        assert BASH_TIMEOUT_SECONDS >= 30, "Timeout too short — agents need time to compile/test"
+        assert BASH_TIMEOUT_SECONDS <= 600, "Timeout too long — hangs would be undetectable"
+
+        # Verify the streaming function takes a timeout_secs parameter
+        sig = inspect.signature(_run_bash_streaming)
+        assert "timeout_secs" in sig.parameters
 
     def test_timeout_expired_produces_failure_outcome(self):
         """When a command times out, it should produce a BASH FAILED outcome."""
-        import subprocess
         from utils.action_executor import prompt_and_execute, Action
 
         action = Action(
@@ -1178,8 +1179,10 @@ class TestBashSubprocessTimeout:
             label="long-running command",
         )
 
-        with patch("utils.action_executor.subprocess.run",
-                    side_effect=subprocess.TimeoutExpired("cmd", 120)):
+        # _run_bash_streaming returns (returncode, output, timed_out).
+        # Simulate a timeout: returncode=None, output="", timed_out=True.
+        with patch("utils.action_executor._run_bash_streaming",
+                   return_value=(None, "", True)):
             outcomes = prompt_and_execute(
                 [action],
                 Path("."),
@@ -1347,12 +1350,10 @@ class TestRichMarkupSafety:
         project = tmp_path / "proj"
         project.mkdir()
 
-        fake_result = MagicMock()
-        fake_result.stdout = poison_output
-        fake_result.stderr = ""
-        fake_result.returncode = 0
-
-        with patch("utils.action_executor.subprocess.run", return_value=fake_result), \
+        # Patch the streaming runner (which replaced subprocess.run) to return
+        # exit-0 with the bracket-poisoned output, without spawning a real process.
+        with patch("utils.action_executor._run_bash_streaming",
+                   return_value=(0, poison_output, False)), \
              patch("utils.action_executor.is_path_escape_bash", return_value=False):
             outcomes = prompt_and_execute(
                 [action], project,

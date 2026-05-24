@@ -1446,9 +1446,13 @@ class Orchestrator:
         from difflib import SequenceMatcher
         return SequenceMatcher(None, a.strip().lower(), b.strip().lower()).ratio()
 
-    # Phrases that resume a paused auto-pilot (matched case-insensitively)
+    # Phrases (or phrase prefixes) that resume a paused auto-pilot.
+    # Matched case-insensitively.  A user input triggers resume if its
+    # full text is in this set OR if it *starts with* one of these tokens
+    # (so "resume work", "continue working", "go ahead" all resume).
     _CONTINUE_PHRASES = frozenset({
-        "continue", "/continue", "go", "go on", "keep going", "resume",
+        "continue", "/continue", "go", "go on", "keep going",
+        "resume", "proceed", "carry on", "keep working",
     })
 
     def _run_autopilot_loop(self, user_input: str, pilot_context: str) -> None:
@@ -1580,9 +1584,25 @@ class Orchestrator:
 
         # Save or clear pending context based on stop reason
         if _stop_reason not in ("complete", "interrupted"):
+            # Strip stale BASH FAILED / HEALTH_CHECK: FAILED markers before
+            # saving — they caused THIS stop and must not cause an immediate
+            # stop again when the user resumes (Guard 3 in _auto_pilot_decide
+            # would fire on iteration 0 and the loop would be unresumable).
+            # Replace with a neutral note so Haiku still knows there was an
+            # issue and can decide the right recovery step.
+            _clean_ctx = re.sub(
+                r"BASH FAILED[^\n]*\n?",
+                "Previous command failed — recovery was attempted.\n",
+                _pilot_context,
+            )
+            _clean_ctx = re.sub(
+                r"HEALTH_CHECK: FAILED[^\n]*\n?",
+                "Previous health check failed — recovery was attempted.\n",
+                _clean_ctx,
+            )
             self._pending_autopilot = {
                 "original_request": user_input,
-                "last_context": _pilot_context,
+                "last_context": _clean_ctx,
                 "reason": _stop_reason,
             }
             self._log_autopilot_stop(_stop_reason, user_input)
@@ -2225,7 +2245,14 @@ class Orchestrator:
         # If auto-pilot was paused (cap, failure, duplicate) and the user
         # types "continue" / "resume" / etc., pick up where we left off
         # instead of routing through Aria.
-        if (user_input.strip().lower() in self._CONTINUE_PHRASES
+        # Matching: exact match OR starts-with, so "resume work",
+        # "continue working", "go ahead" all trigger resume correctly.
+        _user_lower = user_input.strip().lower()
+        _is_continue = (
+            _user_lower in self._CONTINUE_PHRASES
+            or any(_user_lower.startswith(phrase) for phrase in self._CONTINUE_PHRASES)
+        )
+        if (_is_continue
                 and self._pending_autopilot
                 and not getattr(self, "_auto_pilot_active", False)):
             pending = self._pending_autopilot

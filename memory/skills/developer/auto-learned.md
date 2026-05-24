@@ -206,3 +206,12 @@ Never invoke `node_modules\.bin\vitest run` with backslashes directly — use `n
 
 ### [2026-05-24 11:18] via lesson
 Always use `npx vitest` instead of `node_modules/.bin/vitest` — `npx` handles cross-platform path differences automatically, whereas direct `.bin/` paths fail on Windows. Before running Node CLI tools, check if `npx` can invoke them instead.
+
+### [2026-05-24 12:22] via lesson
+Always check that test cleanup methods (like `cancel()`) are actually implemented before calling them. Missing methods cause vitest to hang beyond the 120s bash timeout.
+
+### [2026-05-24 12:29] via lesson
+Always add `--timeout` or remove `--reporter=verbose` when running full test suites with `npx vitest run`, as verbose output causes the 120s default limit to be exceeded.
+
+### [2026-05-24 12:34] via lesson
+Before running `npx vitest run` on integration test suites, use `--reporter=dot` instead of `--reporter=verbose` or increase the timeout above 120s to avoid timeout failures on slow test execution.
