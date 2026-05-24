@@ -37,6 +37,18 @@ class TestBlockedCommands:
         # The exact command that hung: 2>&1 redirect doesn't disable watch mode
         assert is_blocking_bash("npm test -- --reporter=verbose 2>&1") is True
 
+    def test_npm_run_test(self):
+        # npm run test is equivalent to npm test — must be caught
+        assert is_blocking_bash("npm run test") is True
+
+    def test_npm_run_test_in_cd_chain(self):
+        # The exact command that slipped through: cd frontend && npm run test
+        assert is_blocking_bash("cd frontend && npm run test") is True
+
+    def test_npm_run_test_with_verbose(self):
+        # --verbose alone doesn't disable watch mode in npm run test either
+        assert is_blocking_bash("npm run test -- --verbose") is True
+
     def test_vitest_without_run(self):
         assert is_blocking_bash("npx vitest") is True
         assert is_blocking_bash("vitest") is True
@@ -81,6 +93,12 @@ class TestSafeCommands:
     def test_npm_test_with_watchall_false(self):
         assert is_blocking_bash("npm test -- --watchAll=false") is False
         assert is_blocking_bash("npm test -- --watchAll=false --verbose") is False
+
+    def test_npm_run_test_with_watchall_false(self):
+        assert is_blocking_bash("npm run test -- --watchAll=false") is False
+
+    def test_npm_run_test_with_ci_prefix(self):
+        assert is_blocking_bash("set CI=true && npm run test -- --verbose") is False
 
     def test_jest_with_watchall_false(self):
         assert is_blocking_bash("jest --watchAll=false") is False

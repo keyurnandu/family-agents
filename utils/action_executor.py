@@ -53,7 +53,7 @@ _BLOCKING_PATTERNS = [
     re.compile(r"\bnpm\s+(?:run\s+)?(?:start|dev)\b", re.IGNORECASE),  # npm start, npm run dev
     re.compile(r"\byarn\s+(?:start|dev)\b", re.IGNORECASE),      # yarn start, yarn dev
     # Jest / Vitest in watch mode
-    re.compile(r"\bnpm\s+test\b(?!.*--watchAll=false)(?!.*CI=)", re.IGNORECASE),  # npm test without --watchAll=false or CI=
+    re.compile(r"\bnpm\s+(?:run\s+)?tests?\b(?!.*--watchAll=false)(?!.*CI=)", re.IGNORECASE),  # npm test / npm run test without --watchAll=false or CI=
     re.compile(r"\bvitest\b(?!\s+run)", re.IGNORECASE),           # vitest (not vitest run)
     re.compile(r"\bjest\b(?!.*--watchAll=false)(?!.*--ci)", re.IGNORECASE),  # jest without --watchAll=false or --ci
     # Python / other servers
@@ -65,6 +65,7 @@ _BLOCKING_PATTERNS = [
 
 _BLOCKING_SAFE_REPLACEMENTS = {
     "npm test": "set CI=true && npm test -- --verbose",
+    "npm run test": "set CI=true && npm run test -- --verbose",
     "vitest": "node_modules\\.bin\\vitest run --reporter=verbose",
     "vite": "node_modules\\.bin\\vite build",
     "jest": "npm test -- --watchAll=false --verbose",
