@@ -449,7 +449,8 @@ If a command times out (120s cap), the agent doesn't just receive a bare `BASH F
 
 | Partial output contains | Hint shown |
 |---|---|
-| `❯ SomeFile.test.jsx (0 test)` *(vitest)* | **Module-load hang** — file stuck before any test ran. Isolate: `npx vitest run SomeFile.test.jsx`, then probe the imported component for top-level side effects (`new URL(import.meta.url)`, Worker init, fetch) |
+| `✓ src/__tests__/...` lines but no `Test Files` summary *(verbose reporter)* | **Verbose-mode silent hang** — a file is stuck with no `❯` indicator. Re-run without `--reporter=verbose`; check recently written files for stray markdown (``` fences) |
+| `❯ SomeFile.test.jsx (0 test)` *(default reporter)* | **Module-load hang** — file stuck before any test ran. Isolate: `npx vitest run SomeFile.test.jsx`, then probe imported component for top-level side effects |
 | `Watch Usage` / `Press a to run all tests` | Process entered watch mode — use `vitest run` or `set CI=true && npm test` |
 | `Username for` / `Password for` / `Enter passphrase` | Process is waiting for credentials |
 | `ready in 312ms` / `server running` | Process started a dev server — use a build command instead |

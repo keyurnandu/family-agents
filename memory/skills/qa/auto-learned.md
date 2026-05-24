@@ -52,3 +52,6 @@ Never pass unsupported flags to Vitest—always verify flag names using `vitest 
 
 ### [2026-05-24 13:23] via lesson
 Always specify a higher test timeout for vitest (e.g., `vitest run --reporter=verbose --test-timeout=300000`) since PdfViewer.test.jsx hangs past the default 120s limit.
+
+### [2026-05-24 14:00] via lesson
+Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the `❯ filename (0 test)` progress bar that reveals stuck files. A silently hung file produces zero verbose output; the suite times out with no diagnostic signal. Use the default reporter or `--reporter=dot` for full suite runs. Use `--reporter=verbose` ONLY for single-file runs: `npx vitest run SomeFile.test.jsx --reporter=verbose`.

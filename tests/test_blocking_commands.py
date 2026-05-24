@@ -1,8 +1,15 @@
-"""Tests for is_blocking_bash() and _diagnose_timeout() — guards that prevent
-agents from running interactive processes and help them understand timeouts.
+"""Tests for is_blocking_bash(), _diagnose_timeout(), and
+_has_markdown_artifacts() — guards that prevent agents from running
+interactive processes, help them understand timeouts, and stop them
+from writing markdown into code files.
 """
 import pytest
-from utils.action_executor import is_blocking_bash, _diagnose_timeout
+from pathlib import Path
+from utils.action_executor import (
+    is_blocking_bash,
+    _diagnose_timeout,
+    _has_markdown_artifacts,
+)
 
 
 class TestBlockedCommands:
@@ -247,3 +254,118 @@ class TestDiagnoseTimeoutZeroTest:
         # Should get the targeted (0 test) hint, not the generic watch-mode one
         assert "PdfViewer.test.jsx" in hint
         assert "module" in hint.lower()
+
+
+class TestDiagnoseTimeoutVerboseMode:
+    """_diagnose_timeout detects silent hang when --reporter=verbose hides the ❯ bar."""
+
+    def _make_verbose_output(self, files=None):
+        """Build realistic verbose vitest output for the given completed test files."""
+        files = files or [
+            "src/__tests__/PdfSearch.test.jsx",
+            "src/__tests__/DocumentSearch.test.jsx",
+        ]
+        lines = [" RUN  v2.1.9 C:/project/frontend\n"]
+        for f in files:
+            lines.append(f" ✓ {f} > Suite > test one\n")
+            lines.append(f" ✓ {f} > Suite > test two\n")
+        # NO "Test Files" summary — that only prints when ALL files complete
+        return "".join(lines)
+
+    def test_verbose_silent_hang_detected(self):
+        """Verbose output with ✓ lines but no 'Test Files' summary triggers the hint."""
+        partial = self._make_verbose_output()
+        hint = _diagnose_timeout(partial)
+        assert hint, "Expected a hint for verbose-mode silent hang"
+        assert "Test Files" in hint or "summary" in hint.lower()
+        assert "verbose" in hint.lower()
+
+    def test_verbose_hint_lists_completed_files(self):
+        """Completed test file names appear in the hint so the agent knows which is missing."""
+        partial = self._make_verbose_output([
+            "src/__tests__/PdfSearch.test.jsx",
+            "src/__tests__/UploadButton.test.jsx",
+        ])
+        hint = _diagnose_timeout(partial)
+        assert "PdfSearch.test.jsx" in hint
+        assert "UploadButton.test.jsx" in hint
+
+    def test_no_false_positive_when_summary_present(self):
+        """If the 'Test Files' summary IS present, the verbose hint must NOT fire."""
+        partial = (
+            self._make_verbose_output()
+            + "\n Test Files  2 passed (2)\n Tests  4 passed (4)\n"
+        )
+        hint = _diagnose_timeout(partial)
+        # Summary is present — all files completed normally, no hang hint expected
+        assert "Test Files" not in hint or "summary" not in hint.lower() or not hint
+
+    def test_no_false_positive_with_no_test_output(self):
+        """No verbose test lines at all → verbose hint must NOT fire (different problem)."""
+        partial = " RUN  v2.1.9 C:/project/frontend\n"
+        hint = _diagnose_timeout(partial)
+        # No ✓ lines means something else is wrong — not the verbose-reporter hang
+        assert "verbose" not in hint.lower()
+
+    def test_verbose_hint_advises_removing_reporter_flag(self):
+        """Hint must tell the agent to remove --reporter=verbose to reveal the stuck file."""
+        partial = self._make_verbose_output()
+        hint = _diagnose_timeout(partial)
+        assert "verbose" in hint.lower()
+
+
+class TestMarkdownArtifactDetection:
+    """_has_markdown_artifacts() catches stray markdown written into code files."""
+
+    def test_triple_backtick_in_jsx_rejected(self):
+        content = "export default function App() {\n  return <div/>\n}\n```\n"
+        warning = _has_markdown_artifacts(Path("src/App.jsx"), content)
+        assert warning is not None
+        assert "backtick" in warning.lower() or "fence" in warning.lower() or "```" in warning
+
+    def test_triple_backtick_in_py_rejected(self):
+        content = "def hello():\n    pass\n```\nNow run the suite\n"
+        warning = _has_markdown_artifacts(Path("utils/helper.py"), content)
+        assert warning is not None
+
+    def test_prose_instruction_in_js_rejected(self):
+        content = "const x = 1;\nNow run the following command to test:\nnpm test\n"
+        warning = _has_markdown_artifacts(Path("src/index.js"), content)
+        assert warning is not None
+        assert "prose" in warning.lower() or "markdown" in warning.lower()
+
+    def test_clean_jsx_not_rejected(self):
+        content = (
+            "import React from 'react';\n"
+            "export default function App() {\n"
+            "  return <div className='app'>Hello</div>;\n"
+            "}\n"
+        )
+        assert _has_markdown_artifacts(Path("src/App.jsx"), content) is None
+
+    def test_clean_python_not_rejected(self):
+        content = (
+            "def greet(name: str) -> str:\n"
+            "    \"\"\"Return a greeting.\"\"\"\n"
+            "    return f'Hello, {name}'\n"
+        )
+        assert _has_markdown_artifacts(Path("utils/greet.py"), content) is None
+
+    def test_markdown_file_not_checked(self):
+        """Markdown files may contain ``` — they must never be rejected."""
+        content = "# Title\n\n```python\nprint('hello')\n```\n"
+        assert _has_markdown_artifacts(Path("README.md"), content) is None
+
+    def test_yaml_file_not_checked(self):
+        content = "name: my-project\nversion: 1.0.0\n"
+        assert _has_markdown_artifacts(Path("project.yaml"), content) is None
+
+    def test_now_run_phrase_in_tsx_rejected(self):
+        content = "export const x = 1;\nNow run:\nnpm test\n"
+        warning = _has_markdown_artifacts(Path("src/constants.tsx"), content)
+        assert warning is not None
+
+    def test_here_is_phrase_in_py_rejected(self):
+        content = "class Foo:\n    pass\nHere is how to use it:\nfoo = Foo()\n"
+        warning = _has_markdown_artifacts(Path("app/models.py"), content)
+        assert warning is not None

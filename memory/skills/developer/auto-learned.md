@@ -248,3 +248,15 @@ Always validate setupTests.jsx for syntax errors before running `npx vitest run`
 
 ### [2026-05-24 13:16] via lesson
 When `npx vitest run` times out and partial output shows `❯ SomeFile.test.jsx (0 test)` while other files show ✓: the file is STUCK AT MODULE LOAD TIME — no tests ran at all. This is NEVER a test logic problem. Fallback isolation strategy: (1) Run the stuck file alone: `npx vitest run SomeFile.test.jsx`. (2) If it still hangs, probe the component it imports: `node --input-type=module -e "import('./src/components/X.jsx').then(()=>console.log('OK')).catch(e=>console.error(e.message))"`. (3) Cross-reference FILE WRITTEN history — the recently modified component that the stuck test imports is the suspect. Look for module-level side effects: `new URL(import.meta.url)`, Web Worker init, top-level `fetch()` — these crash silently in jsdom/vitest before any test can run. Fix: guard with `if (!import.meta.env.TEST)` or move the side effect inside a `useEffect`. Never retry the full suite until the isolated probe passes.
+
+### [2026-05-24 13:35] via lesson
+Never use `CI=true npx vitest` syntax on Windows CMD; instead use `set CI=true && npx vitest` or run from PowerShell/Git Bash which support Unix-style environment variable syntax.
+
+### [2026-05-24 13:41] via lesson
+Always increase test timeout from 3ms to a realistic value (e.g., 10000ms) and bash timeout from 120s to at least 300s when running full integration test suites with verbose reporting.
+
+### [2026-05-24 14:00] via lesson
+Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the `❯ filename (0 test)` progress bar that reveals stuck files. A silently hung file produces zero verbose output, making the failure completely invisible until the 120s timeout fires. Use the default reporter or `--reporter=dot` for full suite runs. Reserve `--reporter=verbose` for single-file runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+
+### [2026-05-24 14:00] via lesson
+Never write markdown formatting into code files. When writing a .jsx, .js, .ts, .py or other code file, include ONLY the code — never the triple-backtick fences (```) or prose lines like "Now run the following:" or "Here is the implementation:". These are valid in a markdown response but are syntax errors when written to a code file. The file write is rejected immediately with FILE REJECTED if markdown artifacts are detected.

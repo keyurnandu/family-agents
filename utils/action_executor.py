@@ -295,6 +295,33 @@ def _diagnose_timeout(partial_output: str) -> str:
     The vitest ``(0 test)`` case is handled first (before the general hint
     loop) because it extracts the stuck filename for a targeted hint.
     """
+    # ── vitest verbose-reporter silent hang ─────────────────────────────
+    # With --reporter=verbose vitest streams individual test names (no ❯
+    # progress bar).  A file that crashes at load time produces zero output,
+    # so the final "Test Files  N passed" summary is never printed.
+    # Detect: verbose ✓ lines exist, but no "Test Files" summary and no ❯.
+    if (re.search(r"^\s+✓\s+src/", partial_output, re.MULTILINE)
+            and "Test Files" not in partial_output
+            and "❯" not in partial_output):
+        completed = sorted(set(
+            re.findall(
+                r"src/__tests__/[\w./-]+\.(?:test|spec)\.[jt]sx?",
+                partial_output,
+            )
+        ))
+        completed_str = ", ".join(completed) if completed else "other files"
+        return (
+            "Vitest verbose reporter shows individual test results "
+            f"({completed_str}) but never printed a 'Test Files' summary — "
+            "one test file is silently stuck at module-load time. "
+            "The stuck file is the one NOT in the completed list above. "
+            "Step 1: re-run WITHOUT --reporter=verbose so the "
+            "'❯ filename (0 test)' indicator identifies the exact stuck file. "
+            "Step 2: check recently written code files for stray markdown "
+            "content (``` fences, prose lines after closing brace) — these "
+            "cause silent parse failures in the Vite/esbuild transform pipeline."
+        )
+
     # ── vitest zero-test hang ────────────────────────────────────────────
     # Vitest shows "❯ path/to/file.test.jsx (0 test)" when a file is loaded
     # but no test has started — always means a module-level crash/hang in
@@ -327,6 +354,58 @@ def _diagnose_timeout(partial_output: str) -> str:
                 "Consider splitting into smaller steps or increasing BASH_TIMEOUT_SECONDS in action_executor.py."
             )
     return ""
+
+
+# ── Markdown artifact detection ────────────────────────────────────────
+# Agents occasionally write their markdown-formatted response (including
+# the closing ``` fence and prose like "Now run the full suite:") directly
+# into code files instead of extracting only the code content.  This
+# produces a JavaScript/Python syntax error that causes completely silent
+# test-worker crashes — the hardest failure mode to diagnose.
+#
+# Check every code file write BEFORE it hits disk so the agent receives
+# an immediate FILE REJECTED outcome instead of discovering the corruption
+# 15 iterations and hundreds of thousands of tokens later.
+
+_CODE_EXTENSIONS = frozenset({
+    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".py", ".pyw",
+    ".java", ".kt", ".swift", ".go", ".rs", ".c", ".cpp", ".h",
+    ".cs", ".rb", ".php",
+})
+
+# Patterns that are valid in plain text / markdown but NOT in code files
+_MARKDOWN_ARTIFACT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"^```", re.MULTILINE),
+        "triple-backtick fence (```) — markdown wrapper written into code file",
+    ),
+    (
+        re.compile(
+            r"^(?:Now run|Here is|Run the following|The above|You can now|"
+            r"This (?:file|component|code|implementation)|Note that|"
+            r"Make sure|Don't forget|Next(?:,| step))\b",
+            re.MULTILINE,
+        ),
+        "prose instruction line — agent wrote markdown explanation into code file",
+    ),
+]
+
+
+def _has_markdown_artifacts(path: Path, content: str) -> str | None:
+    """Return a warning string if *content* looks like it contains markdown
+    wrapper artifacts that do not belong in a code file.
+
+    Returns ``None`` when the file looks clean.  Only checks file extensions
+    in ``_CODE_EXTENSIONS``; skips markdown, yaml, config, and other text
+    files where backticks or prose are valid.
+    """
+    if path.suffix.lower() not in _CODE_EXTENSIONS:
+        return None
+    for pattern, description in _MARKDOWN_ARTIFACT_PATTERNS:
+        if pattern.search(content):
+            return description
+    return None
 
 
 # ── Destructive command detection ──────────────────────────────────────
@@ -596,8 +675,20 @@ def prompt_and_execute(
                     "[dim](path escapes project directory)[/dim]"
                 )
                 outcomes.append(f"FILE BLOCKED: {a.label} — escapes project directory")
-            else:
-                safe_file_actions.append(a)
+                continue
+            md_warning = _has_markdown_artifacts(Path(a.label), a.content)
+            if md_warning:
+                console.print(
+                    f"  [bold red]✗ REJECTED[/bold red]  [cyan]{a.label}[/cyan]  "
+                    f"[dim]({md_warning})[/dim]"
+                )
+                outcomes.append(
+                    f"FILE REJECTED: {a.label} — {md_warning}. "
+                    "Rewrite the file containing only valid code — no markdown "
+                    "fences (```), no prose instructions after the closing brace."
+                )
+                continue
+            safe_file_actions.append(a)
         file_actions = safe_file_actions
         if not file_actions and not bash_actions:
             return outcomes
