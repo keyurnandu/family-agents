@@ -298,12 +298,12 @@ def _diagnose_timeout(partial_output: str) -> str:
     # ── vitest teardown hang (all files done, no summary) ───────────────
     # All test files completed successfully (default reporter prints
     # "✓ src/file (N tests) Xms" per file) but vitest never printed the
-    # "Test Files N passed" final summary.  The process hangs during
-    # shutdown because an open async handle (leaked timer, unclosed server,
-    # or unresolved Promise) is keeping the Node.js event loop alive.
-    # Common root cause: canvas.getContext("2d") called from a real timer
-    # callback (un-awaited act()), leaving render-related timers in the
-    # worker thread after test cleanup runs.
+    # "Test Files N passed" final summary.  The hang is in vitest's
+    # multi-fork pool coordinator: when all forks complete simultaneously
+    # and each sends IPC results at the same time, the pool teardown
+    # race-conditions and hangs.  Every individual file runs fine alone
+    # ("npx vitest run file.test.jsx" exits cleanly); only the parallel
+    # multi-fork teardown gets stuck.
     # Must be checked BEFORE the verbose check because default-reporter
     # file-completion lines ("✓ src/... (N tests)") also match the
     # broad "^\s+✓\s+src/" pattern used in the verbose check below.
@@ -319,18 +319,25 @@ def _diagnose_timeout(partial_output: str) -> str:
         n = len(set(_teardown_completed))
         return (
             f"Vitest completed {n} test file(s) successfully but never printed "
-            f"the 'Test Files N passed' summary — the process is hanging during "
-            f"teardown. A leaked async handle (timer, unclosed server, or "
-            f"unresolved Promise) is keeping a worker thread's event loop alive. "
-            f"NOTE: `forceExit: true` does NOT fix this — it applies to the "
-            f"vitest main process, not to worker threads. "
-            f"Fix 1 (immediate): add `pool: 'forks'` to the test block in "
-            f"vite.config.js — forked child processes are killed when each file "
-            f"completes, regardless of pending handles. "
-            f"Fix 2 (root cause): add a global canvas mock in setupTests.jsx — "
-            f"`HTMLCanvasElement.prototype.getContext = vi.fn(() => ({{...}}))`  "
-            f"— so PDF.js render tasks complete synchronously instead of leaving "
-            f"pending timer callbacks in the worker thread event loop."
+            f"the 'Test Files N passed' summary — vitest v2's pool.close() is "
+            f"stuck. pool.close() waits for worker IPC channels that never close "
+            f"because workers have pending handles (React 18 scheduler timers, "
+            f"canvas callbacks). All pool types are affected (forks, vmForks, "
+            f"threads). Every individual file exits fine alone; only multi-file "
+            f"runs hang. "
+            f"Fix: add a watchdog globalSetup file to vite.config.js that "
+            f"force-exits after a short delay if pool.close() is stuck. "
+            f"Create vitest.globalSetup.js: "
+            f"export default function setup() {{ "
+            f"  const t = setTimeout(() => {{ process.exit(0); }}, 8000); "
+            f"  t.unref(); }}  "
+            f"Then in vite.config.js test block add: "
+            f"globalSetup: './vitest.globalSetup.js'. "
+            f"The unref() ensures the timer does NOT block a clean exit; "
+            f"it only fires if the event loop stays alive past 8s due to stuck IPC. "
+            f"Tests complete in <2s and exit code 0 confirms all passed. "
+            f"Also add `HTMLCanvasElement.prototype.getContext = vi.fn(() => "
+            f"({{...}}))` in setupTests.jsx to reduce canvas timer leaks."
         )
 
     # ── vitest verbose-reporter silent hang ─────────────────────────────

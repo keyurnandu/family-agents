@@ -337,13 +337,13 @@ class TestDiagnoseTimeoutTeardown:
         partial = self._make_teardown_output()
         hint = _diagnose_timeout(partial)
         assert hint, "Expected a hint for teardown hang"
-        assert "teardown" in hint.lower() or "summary" in hint.lower() or "forceExit" in hint
+        assert "watchdog" in hint.lower() or "globalSetup" in hint or "pool.close" in hint
 
-    def test_hint_mentions_forceexit(self):
-        """Hint must mention forceExit (to warn it does NOT fix worker-thread hangs)."""
+    def test_hint_mentions_globalsetup_watchdog(self):
+        """Hint must mention the globalSetup watchdog as the fix."""
         partial = self._make_teardown_output()
         hint = _diagnose_timeout(partial)
-        assert "forceExit" in hint
+        assert "globalSetup" in hint or "watchdog" in hint.lower()
 
     def test_hint_mentions_canvas_mock(self):
         """Hint must suggest mocking canvas.getContext as the root cause fix."""
@@ -356,7 +356,7 @@ class TestDiagnoseTimeoutTeardown:
         partial = self._make_teardown_output() + "\n Test Files  5 passed (5)\n Tests  122 passed (122)\n"
         hint = _diagnose_timeout(partial)
         assert "teardown" not in hint.lower()
-        assert "forceExit" not in hint
+        assert "globalSetup" not in hint
 
     def test_no_false_positive_with_failures(self):
         """If any test file failed (× line), teardown hint must NOT fire."""
@@ -366,7 +366,7 @@ class TestDiagnoseTimeoutTeardown:
             " × src/__tests__/PdfViewer.test.jsx (3 failed | 18 passed) 312ms\n"
         )
         hint = _diagnose_timeout(partial)
-        assert "forceExit" not in hint
+        assert "globalSetup" not in hint
 
     def test_teardown_takes_priority_over_slow_op_fallback(self):
         """Teardown hint fires instead of the generic slow build fallback."""
@@ -375,7 +375,7 @@ class TestDiagnoseTimeoutTeardown:
             + "installing packages...\n"   # would trigger slow-op fallback
         )
         hint = _diagnose_timeout(partial)
-        assert "forceExit" in hint
+        assert "globalSetup" in hint or "watchdog" in hint.lower()
         assert "slow build" not in hint.lower()
 
     def test_single_completed_file_triggers_hint(self):
@@ -383,7 +383,7 @@ class TestDiagnoseTimeoutTeardown:
         partial = " RUN  v2.1.9 C:/project/frontend\n ✓ src/__tests__/App.integration.test.jsx (31 tests) 693ms\n"
         hint = _diagnose_timeout(partial)
         assert hint
-        assert "forceExit" in hint
+        assert "globalSetup" in hint or "watchdog" in hint.lower()
 
 
 class TestDiagnoseTimeoutDotMode:

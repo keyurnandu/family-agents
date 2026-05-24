@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-280 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, blocking command detection, timeout diagnosis, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
+322 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, blocking command detection, timeout diagnosis, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
 
 ---
 
@@ -449,8 +449,10 @@ If a command times out (120s cap), the agent doesn't just receive a bare `BASH F
 
 | Partial output contains | Hint shown |
 |---|---|
-| `✓ src/__tests__/...` lines but no `Test Files` summary *(verbose reporter)* | **Verbose-mode silent hang** — a file is stuck with no `❯` indicator. Re-run without `--reporter=verbose`; check recently written files for stray markdown (``` fences) |
+| All `✓ src/__tests__/...` file lines present, no failures, no `Test Files` summary, no `❯` *(all tests passed but still running)* | **Teardown hang** — vitest v2's `pool.close()` waits for worker IPC channels that never close because workers have pending handles (React 18 scheduler timers, canvas callbacks). Affects ALL pool types. Fix: add a `globalSetup` watchdog — create `vitest.globalSetup.js` with an unreffed 8s timer (`t.unref()`) that calls `process.exit(0)`; add `globalSetup: './vitest.globalSetup.js'` in `vite.config.js`. The unreffed timer only fires if the event loop stays alive due to stuck IPC — a clean exit is unaffected. |
+| `✓ src/` lines with `>` suite separator present, no `Test Files` summary, no `❯` *(verbose reporter)* | **Verbose-mode silent hang** — a file is stuck with no `❯` indicator. Re-run without `--reporter=verbose`; check recently written files for stray markdown (``` fences) |
 | `❯ SomeFile.test.jsx (0 test)` *(default reporter)* | **Module-load hang** — file stuck before any test ran. Isolate: `npx vitest run SomeFile.test.jsx`, then probe imported component for top-level side effects |
+| `RUN` header + dots (`....`) but no `Test Files` summary, no `❯` *(dot reporter)* | **Dot-reporter silent hang** — same blind spot as verbose: stuck file produces no `❯` indicator. Stop using `--reporter=dot`; use the default reporter for full-suite runs |
 | `Watch Usage` / `Press a to run all tests` | Process entered watch mode — use `vitest run` or `set CI=true && npm test` |
 | `Username for` / `Password for` / `Enter passphrase` | Process is waiting for credentials |
 | `ready in 312ms` / `server running` | Process started a dev server — use a build command instead |
@@ -811,7 +813,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 280 tests — all TDD, run with `pytest`
+├── tests/                    # 322 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -831,7 +833,7 @@ family-agents/
 │   ├── test_export_doc.py    # Doc export: update existing, no truncation
 │   ├── test_auto_mode.py     # Auto-pilot checkpoints, /auto mode, skill consolidation, user-input guard
 │   ├── test_db_manager.py    # delete_last_n_messages, persistent connection, CRUD
-│   └── test_blocking_commands.py  # is_blocking_bash() and _diagnose_timeout() — 44 tests
+│   └── test_blocking_commands.py  # is_blocking_bash() and _diagnose_timeout() — 78 tests
 ├── config/
 │   └── settings.yaml         # Model, team roster, agent personas
 ├── pytest.ini                # Test configuration

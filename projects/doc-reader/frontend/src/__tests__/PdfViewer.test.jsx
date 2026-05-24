@@ -8,26 +8,14 @@ import '@testing-library/jest-dom';
 import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import PDFViewer from '../components/PDFViewer/PDFViewer';
 
-// ---------------------------------------------------------------------------
-// Mock PdfSearch — PDFViewer unit tests focus on PDF.js rendering & navigation.
-// PdfSearch has its own test suite (PdfSearch.test.jsx).
-// ---------------------------------------------------------------------------
 vi.mock('../components/PDFViewer/PdfSearch', () => ({
   default: () => null,
 }));
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function clickElement(el) {
   act(() => { fireEvent.click(el); });
 }
 
-// ---------------------------------------------------------------------------
-// PDF.js mock — simulates a 3-page document
-// Use vi.hoisted so variables are available inside the vi.mock factory.
-// ---------------------------------------------------------------------------
 const MOCK_TOTAL_PAGES = 3;
 
 const { mockPage, mockPdfDoc } = vi.hoisted(() => {
@@ -57,15 +45,8 @@ function renderViewer(props = {}) {
   return render(<PDFViewer url={TEST_PDF_URL} {...props} />);
 }
 
-// ---------------------------------------------------------------------------
-// Global cleanup — unmount after every test so pending promises don't keep
-// the test worker alive.
-// ---------------------------------------------------------------------------
 afterEach(cleanup);
 
-// ---------------------------------------------------------------------------
-// 1. Mount & initial render
-// ---------------------------------------------------------------------------
 describe('US-02 — Render on mount', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -96,7 +77,6 @@ describe('US-02 — Render on mount', () => {
     renderViewer();
     expect(screen.getByRole('status')).toBeInTheDocument();
 
-    // Resolve so React can finish state updates before cleanup
     await act(async () => {
       resolveLoad(mockPdfDoc);
       await loadPromise;
@@ -123,9 +103,6 @@ describe('US-02 — Render on mount', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 2. Page counter display
-// ---------------------------------------------------------------------------
 describe('US-02 — Page counter', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -153,9 +130,6 @@ describe('US-02 — Page counter', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 3. Navigation — Next page
-// ---------------------------------------------------------------------------
 describe('US-02 — Next page navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -204,9 +178,6 @@ describe('US-02 — Next page navigation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 4. Navigation — Previous page
-// ---------------------------------------------------------------------------
 describe('US-02 — Previous page navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -268,9 +239,6 @@ describe('US-02 — Previous page navigation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 5. Error handling
-// ---------------------------------------------------------------------------
 describe('US-02 — Error handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -282,7 +250,7 @@ describe('US-02 — Error handling', () => {
   test('TC-02-18: displays an error message when PDF fails to load', async () => {
     const pdfjs = await import('pdfjs-dist');
     const rejection = Promise.reject(new Error('Failed to fetch PDF'));
-    rejection.catch(() => {}); // suppress unhandled rejection
+    rejection.catch(() => {});
     pdfjs.getDocument.mockReturnValueOnce({ promise: rejection });
 
     renderViewer();
@@ -296,7 +264,7 @@ describe('US-02 — Error handling', () => {
   test('TC-02-19: does not render canvas when PDF fails to load', async () => {
     const pdfjs = await import('pdfjs-dist');
     const rejection = Promise.reject(new Error('Network error'));
-    rejection.catch(() => {}); // suppress unhandled rejection
+    rejection.catch(() => {});
     pdfjs.getDocument.mockReturnValueOnce({ promise: rejection });
 
     renderViewer();
@@ -306,9 +274,6 @@ describe('US-02 — Error handling', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// 6. URL change (re-render with a different document)
-// ---------------------------------------------------------------------------
 describe('US-02 — URL prop change', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -347,6 +312,3 @@ describe('US-02 — URL prop change', () => {
     );
   });
 });
-```
-
-Now running the full suite:
