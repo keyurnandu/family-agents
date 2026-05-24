@@ -27,5 +27,8 @@ projects/*
 *.swp
 *.swo
 
+# Skill consolidation backups — ephemeral, machine-local
+*.bak
+
 # Personal / local files — not for git
 LINKEDIN_ARTICLE.md

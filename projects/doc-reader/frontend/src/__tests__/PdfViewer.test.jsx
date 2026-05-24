@@ -9,6 +9,14 @@ import { vi, describe, test, expect, beforeEach } from 'vitest';
 import PDFViewer from '../components/PDFViewer/PDFViewer';
 
 // ---------------------------------------------------------------------------
+// Mock PdfSearch — PDFViewer unit tests focus on PDF.js rendering & navigation.
+// PdfSearch has its own test suite (PdfSearch.test.jsx).
+// ---------------------------------------------------------------------------
+vi.mock('../components/PDFViewer/PdfSearch', () => ({
+  default: () => null,
+}));
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

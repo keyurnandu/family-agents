@@ -3,79 +3,46 @@
 Lessons captured automatically from failures, corrections, and retrospectives.
 
 ### [2026-05-23 22:30] via user-correction
-This is a WINDOWS machine. NEVER use Unix-only commands: bash, bash -c, tail, head, cat, grep, ls, wc, sed, awk, which, chmod, chown. Use Windows equivalents: cmd /c, Get-Content -Tail, Get-Content -TotalCount, type, findstr, dir, Measure-Object, PowerShell, where.exe, icacls. For checking if files exist, use `dir` or `if exist`, NOT `ls`.
+This is a WINDOWS machine. NEVER use Unix-only commands: bash, bash -c, tail, head, cat, grep, ls, wc, sed, awk, which, chmod, chown. Use Windows equivalents: cmd /c, Get-Content -Tail, Get-Content -TotalCount, type, findstr, dir, Measure-Object, PowerShell, where.exe, icacls. For checking if files exist, use `dir` or `if exist`, NOT `ls`. Use Glob tool for file pattern matching to avoid "command not recognized" errors.
 
-### [2026-05-21 18:13] via bash-failure
-Before running integration tests after code changes, verify that all test method calls match the current implementation signatures — here, `RunnerFactory.get_runner()` changed to accept 1 argument but 15 tests still called it with 2 (runner type + config).
+### [2026-05-23 20:07] via lesson
+Before running or writing tests, verify the source implementation: exception types must match test assertions, method signatures must exist, imported classes must be defined in their source modules, and imported exception classes must exist. Read the actual code first—do not assume test assumptions are correct. This catches mismatches between test expectations and real implementation before wasting time debugging.
+
+### [2026-05-23 05:21] via lesson
+Before running `git add path1 path2...`, verify all paths exist in the working tree using `git status` or Glob tool—non-existent files cause git add to fail silently or with exit(1).
+
+### [2026-05-23 05:37] via lesson
+Before running `git commit`, always stage changes first with `git add` or use `git commit -a` to stage and commit in one command. Untracked or unstaged changes won't be included without explicit staging.
+
+### [2026-05-22 11:10] via lesson
+Before running Playwright-dependent tests, run `playwright install` to ensure browser binaries are available—missing browsers cause runner initialization failures instead of obvious setup errors.
 
 ### [2026-05-21 18:27] via bash-failure
 Always verify `uv` is installed and in PATH before running `uv run` commands on Windows—check with `uv --version` or `where uv` first.
 
+### [2026-05-23 14:26] via lesson
+Always run `npm install` before executing test commands like `vitest run` to ensure testing dependencies (e.g., `@testing-library/react`) are installed in node_modules.
+
 ### [2026-05-22 11:03] via lesson
-Never skip subprocess cleanup in timeout tests on Windows — explicitly close or context-manage all asyncio transports to prevent unraisable exceptions from masking actual test failures.
+On Windows, never skip subprocess cleanup in timeout tests—explicitly close or context-manage all asyncio transports to prevent unraisable exceptions from masking actual test failures.
 
-### [2026-05-22 11:10] via lesson
-Before running pytest on Playwright-dependent tests, run `playwright install` to ensure browser binaries are available—missing browsers cause runner initialization failures instead of obvious setup errors.
+### [2026-05-23 20:14] via lesson
+Always run pytest with `--tb=long` instead of `--tb=short` when you see ERROR entries—the short format truncates AttributeError and traceback details needed to identify the root cause of setup or import failures.
 
-### [2026-05-22 11:18] via lesson
-Always verify RunnerFactory tests pass before running dependent tests—factory tests failing (test_factory_raises_on_unknown_runner_type, test_factory_is_configurable_via_settings) cascade into RunnerNotInitializedError downstream.
+### [2026-05-23 20:17] via lesson
+On Windows, keep projects out of problematic paths: never run pytest from OneDrive or protected directories (use `C:\Users\username\code\` instead to avoid PermissionError and file locking), and avoid paths with spaces when using Vitest (e.g., 'OneDrive - Adobe')—both cause cryptic failures during test execution or transform phases.
 
-### [2026-05-22 11:25] via lesson
-Before running tests, grep the implementation to verify exception types and method signatures match test assertions—this would have caught `RunnerNotFoundError` vs `ValueError` and the missing `create_default()` method.
-
-### [2026-05-22 15:39] via lesson
-Always verify the test file path exists before running pytest; use `Glob` or `ls tests/` to confirm files are in the expected location. This prevents 'file or directory not found' errors that waste time.
-
-### [2026-05-22 22:42] via lesson
-Always verify that imported classes in test files actually exist in their source modules before running pytest—ScheduleRunRequest must be defined in app.dtos.run or imports will fail during collection. Check the source module first to confirm the class is exported before investigating test logic.
-
-### [2026-05-22 22:45] via lesson
-Always use `--tb=long` when running `pytest` on a full test suite with failures; `--tb=short` hides the actual error messages needed to identify whether failures are from a common root cause (like a missing import or config issue) versus isolated test problems.
-
-### [2026-05-23 04:59] via lesson
-Before running `git add` with multiple file paths, verify each file exists using the Glob tool or `ls` command. Always check that paths are relative to the repository root to prevent pathspec mismatch errors that block commits.
-
-### [2026-05-23 05:00] via lesson
-Always verify the exact file path using `ls` or `find` against the actual directory structure before staging changes to `.github/workflows/` configuration files. Never commit with an assumed path for CI workflows without confirming the location exists first.
-
-### [2026-05-23 05:01] via lesson
-Never use Unix commands like `ls` in CI/CD scripts without specifying bash explicitly — this failed because the process fell back to cmd.exe instead of running in bash. Always wrap with `bash -c` or verify the shell environment is active first.
-
-### [2026-05-23 05:03] via lesson
-Always verify exact file paths in chained bash commands (`&&`) before execution—the command used `tests\conft` instead of the actual `tests\conftest.py`, causing the entire verification chain to exit(1).
-
-### [2026-05-23 05:10] via lesson
-Never use `git bash` to run shell commands; `git bash` is not a valid git command—use the Bash tool directly instead.
-
-### [2026-05-23 05:10] via lesson
-Never use Unix commands like `ls` on Windows systems; use the Glob tool for file pattern matching to avoid "command not recognized" errors.
-
-### [2026-05-23 05:10] via lesson
-Before running `git add` with specific file paths, verify those files exist in the repository using the Glob tool, since attempting to add non-existent files fails silently.
-
-### [2026-05-23 05:18] via lesson
-Before using `git add path1 path2 path3`, verify all paths appear in `git status` output — missing files cause exit 1 failures.
-
-### [2026-05-23 05:21] via lesson
-Before running `git add` with specific file paths, verify those files actually exist in the working tree. This command failed because `.github/workflows/ci.yml`, `scripts/audit_browsers.py`, and `tests/conftest.py` don't appear in the git status output.
-
-### [2026-05-23 05:25] via lesson
-Before running `git commit -m`, run `git status` to verify changes are staged, or use `git commit -a -m` to stage and commit tracked changes in one command.
-
-### [2026-05-23 05:31] via lesson
-Before running `git commit`, always stage changes first with `git add -A` or use `git commit -a` to stage and commit in one command. The `git commit -m` command alone doesn't automatically stage unstaged files.
-
-### [2026-05-23 05:37] via lesson
-Always run `git add` to stage files before `git commit`; untracked or unstaged changes won't be included without explicit staging.
-
-### [2026-05-23 12:39] via lesson
-Before running pytest, verify all app module imports work by testing them directly (e.g., `python -c 'import app.core.database'`), since conftest setup failures often mask unresolved import errors in the application code itself. This catches missing exports or circular dependencies before wasting time debugging test runner errors.
-
-### [2026-05-23 13:18] via lesson
-Always verify that concrete runner implementations (SeleniumRunner, PlaywrightRunner) implement all abstract methods from BaseRunner before running `test_phase5_integration_edge_cases.py`. Check that `SeleniumRunner.run()` is implemented, not just declared as abstract.
+### [2026-05-23 14:54] via lesson
+Before running Vitest integration tests, verify fetch mocks are configured for all API endpoints—missing mocks cause unexpected failures ("Failed to load documents") instead of obvious setup errors.
 
 ### [2026-05-23 13:23] via lesson
-Before running the full test suite, verify the OpenAPI contract implementation is complete—specifically that RunnerType enum and runner field are defined on all required response types (TriggerRunResponse, RunStatusResponse, RunSummary). The 78 errors indicate missing schema implementation rather than logic bugs.
+Before running the full test suite with API response types, verify the OpenAPI contract implementation is complete—check that RunnerType enum and runner field are defined on all required response types (TriggerRunResponse, RunStatusResponse, RunSummary).
 
-### [2026-05-23 13:30] via lesson
-Always verify that Settings class in app/core/config.py defines all fields referenced in tests before running pytest — APP_VERSION was missing, causing AttributeError. Check app/core/config.py first when tests fail with "'Settings' object has no attribute" errors.
+### [2026-05-22 11:18] via lesson
+Verify RunnerFactory tests pass before running dependent tests—factory test failures (test_factory_raises_on_unknown_runner_type, test_factory_is_configurable_via_settings) cascade into RunnerNotInitializedError downstream.
+
+### [2026-05-23 20:23] via lesson
+Always run `uv run pytest tests/test_runner_factory.py -x --tb=short` on a single test file when facing truncated AttributeError messages across multiple tests. Full-suite runs cascade the initial failure and truncate error output, hiding the root cause.
+
+### [2026-05-24 01:38] via lesson
+Always add `--timeout=60000` when running `vitest run` to fail fast on hanging tests instead of waiting for the 120s default timeout. This prevents blocking test runs and surfaces slow/frozen tests immediately.
