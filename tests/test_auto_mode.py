@@ -781,8 +781,50 @@ class TestAutoPilotResume:
     """When auto-pilot stops prematurely (cap, failure, duplicate), it should
     save context so the user can type 'continue' to resume."""
 
-    def test_guard2_failure_flags_premature(self, base_dir, config):
-        """Guard 2 (failure with no progress) should return premature=True."""
+    def test_guard2_user_input_needed_stops(self, base_dir, config):
+        """Guard 2 (user-input-needed) should stop when team asks a question."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        # Simulate Aria asking the user for input
+        response = (
+            "The uishift-backend2 project files are not available.\n"
+            "Could you confirm: Is the project in a different directory?"
+        )
+        result = orch._auto_pilot_decide(
+            user_input="implement sprint 3",
+            final_response=response,
+            iteration=0,
+        )
+        assert result["continue"] is False
+        assert result.get("premature") is True
+        assert result.get("reason") == "user_input_needed"
+
+    def test_guard2_user_input_case_insensitive(self, base_dir, config):
+        """User-input-needed detection should be case-insensitive."""
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        orch = Orchestrator("test", base_dir, db, display, config=config)
+
+        result = orch._auto_pilot_decide(
+            user_input="build auth",
+            final_response="PLEASE PROVIDE the database connection string.",
+            iteration=0,
+        )
+        assert result["continue"] is False
+        assert result.get("reason") == "user_input_needed"
+
+    def test_guard3_failure_flags_premature(self, base_dir, config):
+        """Guard 3 (failure with no progress) should return premature=True."""
         from orchestrator import Orchestrator
         from utils.db_manager import DBManager
         from utils.display import Display

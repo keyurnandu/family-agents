@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-222 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
+224 tests should pass in under 7 seconds. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
 
 ---
 
@@ -335,10 +335,11 @@ Press **Ctrl+C** at any time to interrupt the auto-pilot loop. Type **continue**
 
 ### Safety guards
 
-Auto-pilot has three built-in guards that prevent getting stuck:
+Auto-pilot has four built-in guards that prevent getting stuck:
 
 | Guard | What it does |
 |---|---|
+| **User-input-needed** | If the team's response asks you a question ("could you confirm", "please provide", etc.), auto-pilot stops immediately — the team is blocked on your input |
 | **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
 | **Checkpoint cap** | Normal mode: pauses every 5 iterations for manual "continue". `/auto` mode: auto-resets at each checkpoint, hard ceiling at 50 iterations |
@@ -785,7 +786,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 222 tests — all TDD, run with `pytest`
+├── tests/                    # 224 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching

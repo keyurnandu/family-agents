@@ -1609,10 +1609,13 @@ class Orchestrator:
 
         Safety guards (checked BEFORE the Haiku call — zero-cost):
         1. Hard cap: iteration >= hard ceiling → stop
-        2. Failure exit: if final_response contains BASH FAILED or
+        2. User-input-needed: if final_response contains phrases like
+           "could you confirm", "please provide", "waiting for your" →
+           stop (team is blocked on user input)
+        3. Failure exit: if final_response contains BASH FAILED or
            HEALTH_CHECK: FAILED → stop UNLESS RETRY OUTCOMES shows the
            agent already self-healed (all retry entries are OK/PASSED)
-        3. Duplicate detection: if Haiku's next_message is >80% similar to
+        4. Duplicate detection: if Haiku's next_message is >80% similar to
            any previous_messages entry → stop (it's a loop)
         """
         _STOP = {"continue": False, "next_message": ""}
@@ -1622,7 +1625,37 @@ class Orchestrator:
         if iteration >= _hard_cap:
             return _STOP
 
-        # Guard 2: failure exit — stop if the last iteration had unresolved
+        # Guard 2: user-input-needed — stop if the team is asking the user
+        # a question or is blocked waiting for information.  These phrases
+        # indicate the team cannot proceed without user input.
+        _USER_INPUT_PHRASES = (
+            "could you confirm",
+            "could you provide",
+            "can you confirm",
+            "can you provide",
+            "can you share",
+            "please confirm",
+            "please provide",
+            "please share",
+            "let us know",
+            "let me know",
+            "we need you to",
+            "waiting for your",
+            "need your input",
+            "what would you like",
+            "what do you prefer",
+            "which option",
+            "which approach",
+        )
+        _lower_response = final_response.lower()
+        if any(phrase in _lower_response for phrase in _USER_INPUT_PHRASES):
+            console.print(
+                "[yellow]  ⚠ Auto-pilot stopping — "
+                "team is asking for your input[/yellow]"
+            )
+            return {"continue": False, "next_message": "", "premature": True, "reason": "user_input_needed"}
+
+        # Guard 3: failure exit — stop if the last iteration had unresolved
         # failures with NO evidence of progress.  The agent is "making
         # progress" when the response also contains successful outcomes
         # (FILE WRITTEN, BASH OK, HEALTH_CHECK: PASSED) — either in the
