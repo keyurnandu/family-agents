@@ -321,6 +321,9 @@ class Orchestrator:
         # when no files have changed.  Stores a frozenset of (relpath, mtime).
         self._project_scan_key: frozenset | None = None
 
+        # Skill consolidation — runs once per session on the first process() call.
+        self._skills_consolidated: bool = False
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
@@ -720,6 +723,101 @@ class Orchestrator:
         )
         parts.append(synth_instruction)
         return "\n".join(parts)
+
+    # ------------------------------------------------------------------
+    # Skill consolidation — merge redundant lessons when files get large
+    # ------------------------------------------------------------------
+
+    # Consolidation fires when an auto-learned.md exceeds this many chars.
+    _CONSOLIDATION_THRESHOLD = 3000
+
+    def _consolidate_skills_if_needed(self) -> None:
+        """Check every active agent's auto-learned file; consolidate if large.
+
+        Runs once per session (guarded by ``_skills_consolidated``).
+        Uses Haiku to merge redundant lessons, remove stale ones, and
+        compress — keeping the file concise and token-efficient.
+        Backs up the original to ``.bak`` before overwriting.
+        """
+        if self._skills_consolidated:
+            return
+        self._skills_consolidated = True
+
+        from agents.agent import Agent
+
+        skills_dir = self.memory._skills_dir
+        if not skills_dir.exists():
+            return
+
+        for role in list(self.agents.keys()):
+            learned_path = skills_dir / role / "auto-learned.md"
+            if not learned_path.exists():
+                continue
+            content = learned_path.read_text(encoding="utf-8")
+            if len(content) < self._CONSOLIDATION_THRESHOLD:
+                continue
+
+            # Count lessons (### headers)
+            lesson_count = content.count("\n### ")
+            if lesson_count < 10:
+                continue
+
+            persona = self.config["agent_personas"].get(role, {})
+            name = persona.get("name", role.upper())
+
+            try:
+                consolidated = call_claude(
+                    prompt=(
+                        f"Below are {lesson_count} lessons auto-learned by {name} ({role}).\n"
+                        "Many are redundant, stale, or overly verbose.\n\n"
+                        "CONSOLIDATE them into a concise, non-redundant set:\n"
+                        "- Merge duplicates into one crisp rule\n"
+                        "- Drop lessons that contradict each other (keep the latest)\n"
+                        "- Drop lessons that are too vague or not actionable\n"
+                        "- Keep the '### [date] via trigger' format for each lesson\n"
+                        "  (use the most recent date when merging duplicates)\n"
+                        "- Start the file with the same header line\n"
+                        "- Aim for ≤30% of the original lesson count\n\n"
+                        "Return ONLY the consolidated markdown file content, "
+                        "nothing else.\n\n"
+                        "---\n\n"
+                        f"{content}"
+                    ),
+                    system_prompt=(
+                        "You consolidate auto-learned lessons for an AI agent. "
+                        "Be ruthless about deduplication — if 10 lessons say "
+                        "'verify imports before running pytest', keep ONE that "
+                        "captures the best version. Preserve actionable specifics. "
+                        "Output only the consolidated markdown."
+                    ),
+                    model="haiku",
+                )
+            except Exception as exc:
+                console.print(
+                    f"[dim yellow]  ⚠ Skill consolidation failed for {name}: {exc}[/dim yellow]"
+                )
+                continue
+
+            if not consolidated or len(consolidated.strip()) < 100:
+                continue  # sanity check — don't overwrite with empty/tiny result
+
+            # Back up original, write consolidated version
+            backup_path = learned_path.with_suffix(".md.bak")
+            backup_path.write_text(content, encoding="utf-8")
+            learned_path.write_text(consolidated.strip() + "\n", encoding="utf-8")
+
+            # Evict cached prompts for this role
+            Agent._prompt_cache = {
+                k: v for k, v in Agent._prompt_cache.items()
+                if k[0] != role
+            }
+
+            new_count = consolidated.count("\n### ")
+            console.print(
+                f"[dim green]  🧹 {persona.get('emoji', '')} {name}: "
+                f"consolidated {lesson_count} → {new_count} lessons "
+                f"({len(content):,} → {len(consolidated):,} chars)[/dim green]"
+            )
 
     # ------------------------------------------------------------------
     # Feedback loop — auto-learning from failures, corrections, retrospectives
@@ -1948,6 +2046,15 @@ class Orchestrator:
         # Track last input so /redo can re-submit or edit after Ctrl+C
         self.last_user_input = user_input
         self._interrupted = False
+
+        # ── Once-per-session skill consolidation ─────────────────────────
+        # Merges redundant auto-learned lessons when files get large.
+        # Runs on the very first process() call only (guarded internally).
+        if not self._skills_consolidated:
+            try:
+                self._consolidate_skills_if_needed()
+            except Exception:
+                self._skills_consolidated = True  # don't retry on failure
 
         # ── Populate per-turn caches (one disk read each, shared across all
         #    routing / agent / synthesis calls in this turn) ────────────────

@@ -1857,3 +1857,97 @@ class TestProjectDirAutoScan:
         # Total files should only count the real file
         assert ctx["total_files"] == 1
         db.close()
+
+
+class TestSkillConsolidation:
+    """Auto-consolidation of bloated auto-learned skill files."""
+
+    def _make_orch(self, base_dir, config):
+        from orchestrator import Orchestrator
+        from utils.db_manager import DBManager
+        from utils.display import Display
+
+        db = DBManager(base_dir / "db" / "conversations.db")
+        display = Display()
+        return Orchestrator("test", base_dir, db, display, config=config)
+
+    def _write_big_skill_file(self, base_dir, role, lesson_count=40):
+        """Write a skill file that exceeds the consolidation threshold."""
+        skills_dir = base_dir / "memory" / "skills" / role
+        skills_dir.mkdir(parents=True, exist_ok=True)
+        path = skills_dir / "auto-learned.md"
+        lines = [f"# Auto-Learned Lessons — {role}\n\n"]
+        for i in range(lesson_count):
+            lines.append(f"### [2026-05-{20 + i % 10:02d} 10:00] via bash-failure\n")
+            lines.append(f"Always verify imports exist before running pytest (lesson {i}).\n\n")
+        path.write_text("".join(lines), encoding="utf-8")
+        return path
+
+    def test_consolidation_triggers_on_large_file(self, base_dir, config):
+        """Consolidation should call Haiku when a skill file exceeds the threshold."""
+        orch = self._make_orch(base_dir, config)
+        path = self._write_big_skill_file(base_dir, "developer", 40)
+
+        original_content = path.read_text(encoding="utf-8")
+        consolidated_mock = (
+            "# Auto-Learned Lessons — developer\n\n"
+            "### [2026-05-29 10:00] via bash-failure\n"
+            "Always verify imports exist before running pytest.\n"
+        )
+
+        with patch("orchestrator.call_claude", return_value=consolidated_mock):
+            orch._consolidate_skills_if_needed()
+
+        # Should have written consolidated content
+        new_content = path.read_text(encoding="utf-8")
+        assert len(new_content) < len(original_content)
+        # Should have created a backup
+        backup = path.with_suffix(".md.bak")
+        assert backup.exists()
+        assert backup.read_text(encoding="utf-8") == original_content
+
+    def test_consolidation_skips_small_files(self, base_dir, config):
+        """Consolidation should not run on files below the threshold."""
+        orch = self._make_orch(base_dir, config)
+        # Write a small file (3 lessons)
+        self._write_big_skill_file(base_dir, "developer", 3)
+
+        with patch("orchestrator.call_claude") as mock_claude:
+            orch._consolidate_skills_if_needed()
+        # Haiku should NOT have been called
+        mock_claude.assert_not_called()
+
+    def test_consolidation_runs_once_per_session(self, base_dir, config):
+        """Consolidation should only run on the first process() call."""
+        orch = self._make_orch(base_dir, config)
+        self._write_big_skill_file(base_dir, "developer", 40)
+
+        consolidated_mock = (
+            "# Auto-Learned Lessons — developer\n\n"
+            "### [2026-05-29 10:00] via bash-failure\n"
+            "Always verify imports exist before running pytest.\n"
+        )
+
+        with patch("orchestrator.call_claude", return_value=consolidated_mock):
+            orch._consolidate_skills_if_needed()
+
+        assert orch._skills_consolidated is True
+
+        # Second call should be a no-op
+        with patch("orchestrator.call_claude") as mock_claude:
+            orch._consolidate_skills_if_needed()
+        mock_claude.assert_not_called()
+
+    def test_consolidation_handles_haiku_failure(self, base_dir, config):
+        """If Haiku fails, consolidation should skip gracefully."""
+        orch = self._make_orch(base_dir, config)
+        path = self._write_big_skill_file(base_dir, "developer", 40)
+        original_content = path.read_text(encoding="utf-8")
+
+        with patch("orchestrator.call_claude", side_effect=Exception("API error")):
+            orch._consolidate_skills_if_needed()  # should not raise
+
+        # File should be unchanged
+        assert path.read_text(encoding="utf-8") == original_content
+        # No backup created
+        assert not path.with_suffix(".md.bak").exists()
