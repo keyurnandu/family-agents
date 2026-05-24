@@ -46,3 +46,9 @@ Always run `uv run pytest tests/test_runner_factory.py -x --tb=short` on a singl
 
 ### [2026-05-24 01:38] via lesson
 Always add `--timeout=60000` when running `vitest run` to fail fast on hanging tests instead of waiting for the 120s default timeout. This prevents blocking test runs and surfaces slow/frozen tests immediately.
+
+### [2026-05-24 12:54] via lesson
+Never pass unsupported flags to Vitest—always verify flag names using `vitest run --help` before executing test commands. The `--timeout` flag caused a CACError because it's not a valid Vitest CLI option.
+
+### [2026-05-24 13:23] via lesson
+Always specify a higher test timeout for vitest (e.g., `vitest run --reporter=verbose --test-timeout=300000`) since PdfViewer.test.jsx hangs past the default 120s limit.

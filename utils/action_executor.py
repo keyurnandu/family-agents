@@ -291,7 +291,32 @@ def _diagnose_timeout(partial_output: str) -> str:
     Scans the partial output captured before the kill for well-known
     interactive/stuck signatures. Returns an empty string if no pattern
     matches (caller falls back to the no-output heuristic).
+
+    The vitest ``(0 test)`` case is handled first (before the general hint
+    loop) because it extracts the stuck filename for a targeted hint.
     """
+    # ── vitest zero-test hang ────────────────────────────────────────────
+    # Vitest shows "❯ path/to/file.test.jsx (0 test)" when a file is loaded
+    # but no test has started — always means a module-level crash/hang in
+    # the component under test (new URL(import.meta.url), Worker init, fetch).
+    _zero_test_m = re.search(r"❯\s+(\S+.*?)\s+\(0 test", partial_output)
+    if _zero_test_m:
+        stuck_file = _zero_test_m.group(1).strip()
+        return (
+            f"A test file is stuck at module-load time — vitest shows "
+            f"'{stuck_file} (0 test)' and never advances while other files pass. "
+            f"Isolation strategy: "
+            f"(1) Run the stuck file alone: `npx vitest run {stuck_file}`. "
+            f"(2) If it still hangs, probe the component it imports directly: "
+            f"`node --input-type=module -e \"import('./src/components/X/X.jsx')"
+            f".then(()=>console.log('OK')).catch(e=>console.error(e.message))\"`. "
+            f"(3) Cross-reference FILE WRITTEN history — the recently modified "
+            f"component that '{stuck_file}' imports is the suspect. "
+            f"Look for module-level side effects: new URL(import.meta.url), "
+            f"Web Worker init, top-level fetch(), or canvas.getContext() — "
+            f"these crash or hang in jsdom/vitest before any test can run."
+        )
+
     for pattern, hint in _INTERACTIVE_OUTPUT_HINTS:
         if pattern.search(partial_output):
             return hint

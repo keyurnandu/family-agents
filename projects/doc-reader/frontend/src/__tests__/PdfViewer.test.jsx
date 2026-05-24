@@ -3,9 +3,9 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import { vi, describe, test, expect, beforeEach } from 'vitest';
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import PDFViewer from '../components/PDFViewer/PDFViewer';
 
 // ---------------------------------------------------------------------------
@@ -21,23 +21,26 @@ vi.mock('../components/PDFViewer/PdfSearch', () => ({
 // ---------------------------------------------------------------------------
 
 function clickElement(el) {
-  act(() => { fireEvent.click(el) })
+  act(() => { fireEvent.click(el); });
 }
 
 // ---------------------------------------------------------------------------
 // PDF.js mock — simulates a 3-page document
+// Use vi.hoisted so variables are available inside the vi.mock factory.
 // ---------------------------------------------------------------------------
 const MOCK_TOTAL_PAGES = 3;
 
-const mockPage = {
-  getViewport: vi.fn().mockReturnValue({ width: 800, height: 600, scale: 1 }),
-  render: vi.fn().mockReturnValue({ promise: Promise.resolve() }),
-};
-
-const mockPdfDoc = {
-  numPages: MOCK_TOTAL_PAGES,
-  getPage: vi.fn().mockResolvedValue(mockPage),
-};
+const { mockPage, mockPdfDoc } = vi.hoisted(() => {
+  const mockPage = {
+    getViewport: vi.fn(() => ({ width: 800, height: 600, scale: 1 })),
+    render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
+  };
+  const mockPdfDoc = {
+    numPages: 3,
+    getPage: vi.fn(() => Promise.resolve(mockPage)),
+  };
+  return { mockPage, mockPdfDoc };
+});
 
 vi.mock('pdfjs-dist', () => ({
   getDocument: vi.fn(() => ({
@@ -55,10 +58,21 @@ function renderViewer(props = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Global cleanup — unmount after every test so pending promises don't keep
+// the test worker alive.
+// ---------------------------------------------------------------------------
+afterEach(cleanup);
+
+// ---------------------------------------------------------------------------
 // 1. Mount & initial render
 // ---------------------------------------------------------------------------
 describe('US-02 — Render on mount', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-01: renders a canvas element for PDF display', async () => {
     renderViewer();
@@ -67,6 +81,7 @@ describe('US-02 — Render on mount', () => {
 
   test('TC-02-02: calls pdfjs.getDocument with the provided URL on mount', async () => {
     const pdfjs = await import('pdfjs-dist');
+    pdfjs.getDocument.mockReturnValue({ promise: Promise.resolve(mockPdfDoc) });
     renderViewer();
     await waitFor(() => expect(pdfjs.getDocument).toHaveBeenCalledTimes(1));
     expect(pdfjs.getDocument).toHaveBeenCalledWith(TEST_PDF_URL);
@@ -74,10 +89,18 @@ describe('US-02 — Render on mount', () => {
 
   test('TC-02-03: shows a loading indicator before PDF is ready', async () => {
     const pdfjs = await import('pdfjs-dist');
-    pdfjs.getDocument.mockReturnValueOnce({ promise: new Promise(() => {}) });
+    let resolveLoad;
+    const loadPromise = new Promise((resolve) => { resolveLoad = resolve; });
+    pdfjs.getDocument.mockReturnValueOnce({ promise: loadPromise });
 
     renderViewer();
     expect(screen.getByRole('status')).toBeInTheDocument();
+
+    // Resolve so React can finish state updates before cleanup
+    await act(async () => {
+      resolveLoad(mockPdfDoc);
+      await loadPromise;
+    });
   });
 
   test('TC-02-04: hides the loading indicator once PDF has loaded', async () => {
@@ -104,7 +127,12 @@ describe('US-02 — Render on mount', () => {
 // 2. Page counter display
 // ---------------------------------------------------------------------------
 describe('US-02 — Page counter', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-07: displays "Page 1 of 3" on initial render', async () => {
     renderViewer();
@@ -129,7 +157,12 @@ describe('US-02 — Page counter', () => {
 // 3. Navigation — Next page
 // ---------------------------------------------------------------------------
 describe('US-02 — Next page navigation', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-09: renders a "Next" button', async () => {
     renderViewer();
@@ -175,7 +208,12 @@ describe('US-02 — Next page navigation', () => {
 // 4. Navigation — Previous page
 // ---------------------------------------------------------------------------
 describe('US-02 — Previous page navigation', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-13: renders a "Previous" button', async () => {
     renderViewer();
@@ -211,6 +249,9 @@ describe('US-02 — Previous page navigation', () => {
     await waitFor(() => screen.getByText(/page\s*2\s*of\s*3/i));
 
     vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
     clickElement(screen.getByRole('button', { name: /prev/i }));
 
     await waitFor(() => expect(mockPdfDoc.getPage).toHaveBeenCalledWith(1));
@@ -231,7 +272,12 @@ describe('US-02 — Previous page navigation', () => {
 // 5. Error handling
 // ---------------------------------------------------------------------------
 describe('US-02 — Error handling', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-18: displays an error message when PDF fails to load', async () => {
     const pdfjs = await import('pdfjs-dist');
@@ -264,14 +310,24 @@ describe('US-02 — Error handling', () => {
 // 6. URL change (re-render with a different document)
 // ---------------------------------------------------------------------------
 describe('US-02 — URL prop change', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+  });
 
   test('TC-02-20: reloads PDF when the url prop changes', async () => {
     const pdfjs = await import('pdfjs-dist');
+    pdfjs.getDocument.mockReturnValue({ promise: Promise.resolve(mockPdfDoc) });
     const { rerender } = renderViewer({ url: '/uploads/doc-a.pdf' });
     await waitFor(() => expect(pdfjs.getDocument).toHaveBeenCalledWith('/uploads/doc-a.pdf'));
 
     vi.clearAllMocks();
+    mockPage.render.mockReturnValue({ promise: Promise.resolve(), cancel: vi.fn() });
+    mockPage.getViewport.mockReturnValue({ width: 800, height: 600, scale: 1 });
+    mockPdfDoc.getPage.mockResolvedValue(mockPage);
+    pdfjs.getDocument.mockReturnValue({ promise: Promise.resolve(mockPdfDoc) });
     rerender(<PDFViewer url="/uploads/doc-b.pdf" />);
 
     await waitFor(() => expect(pdfjs.getDocument).toHaveBeenCalledWith('/uploads/doc-b.pdf'));
@@ -291,3 +347,6 @@ describe('US-02 — URL prop change', () => {
     );
   });
 });
+```
+
+Now running the full suite:

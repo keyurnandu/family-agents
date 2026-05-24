@@ -215,3 +215,36 @@ Always add `--timeout` or remove `--reporter=verbose` when running full test sui
 
 ### [2026-05-24 12:34] via lesson
 Before running `npx vitest run` on integration test suites, use `--reporter=dot` instead of `--reporter=verbose` or increase the timeout above 120s to avoid timeout failures on slow test execution.
+
+### [2026-05-24 12:46] via lesson
+Always increase the Bash timeout beyond 120s when running `vitest run`, or first debug why PdfViewer.test.jsx hangs during initialization (shows "0 test" in progress).
+
+### [2026-05-24 12:52] via lesson
+Always name files containing JSX with `.jsx` or `.tsx` extensions when using Vitest/Vite, as the import-analysis plugin requires correct file extensions to parse JSX syntax. Rename `src/setupTests.js` to `src/setupTests.jsx` before running tests.
+
+### [2026-05-24 12:58] via lesson
+Before running test or build commands, read vite.config.js to validate syntax—unterminated strings cause esbuild failures that are expensive to debug after the fact.
+
+### [2026-05-24 13:00] via lesson
+Always validate vite.config.js for syntax errors (unterminated strings, debug comments) before running `npx vitest` or build commands—check the file content at the error line number first.
+
+### [2026-05-24 13:01] via lesson
+Always check vite.config.js for syntax errors (unterminated strings, malformed code) before running vitest, since config load failures block all test execution regardless of test code validity.
+
+### [2026-05-24 13:04] via lesson
+Always verify the test framework (Jest vs Vitest) before passing CLI flags—Vitest uses `--watch=false`, not Jest's `--watchAll=false`.
+
+### [2026-05-24 13:05] via lesson
+Before running vitest commands, check vite.config.js for syntax errors (unterminated strings, unclosed brackets) as esbuild errors at startup prevent any tests from running. Use a syntax validator or carefully review recent changes to the config file first.
+
+### [2026-05-24 13:07] via lesson
+Before running npm test, ensure vite.config.js contains only valid JavaScript syntax with proper comment delimiters (// or /* */)—never add plain-text strings outside of quoted/commented code.
+
+### [2026-05-24 13:09] via lesson
+Always validate syntax in vite.config.js (especially quote balance for string literals) before running vitest—unterminated strings will immediately fail config parsing during test startup.
+
+### [2026-05-24 13:10] via lesson
+Always validate setupTests.jsx for syntax errors before running `npx vitest run`—unterminated string literals in setup files fail the entire test transform pipeline.
+
+### [2026-05-24 13:16] via lesson
+When `npx vitest run` times out and partial output shows `❯ SomeFile.test.jsx (0 test)` while other files show ✓: the file is STUCK AT MODULE LOAD TIME — no tests ran at all. This is NEVER a test logic problem. Fallback isolation strategy: (1) Run the stuck file alone: `npx vitest run SomeFile.test.jsx`. (2) If it still hangs, probe the component it imports: `node --input-type=module -e "import('./src/components/X.jsx').then(()=>console.log('OK')).catch(e=>console.error(e.message))"`. (3) Cross-reference FILE WRITTEN history — the recently modified component that the stuck test imports is the suspect. Look for module-level side effects: `new URL(import.meta.url)`, Web Worker init, top-level `fetch()` — these crash silently in jsdom/vitest before any test can run. Fix: guard with `if (!import.meta.env.TEST)` or move the side effect inside a `useEffect`. Never retry the full suite until the isolated probe passes.

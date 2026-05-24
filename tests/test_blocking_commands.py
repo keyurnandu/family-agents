@@ -213,3 +213,37 @@ class TestDiagnoseTimeout:
         partial = "PASS src/App.test.js\n  ✓ renders without crashing (12ms)\n1 test passed"
         hint = _diagnose_timeout(partial)
         assert hint == ""
+
+
+class TestDiagnoseTimeoutZeroTest:
+    """_diagnose_timeout detects vitest (0 test) module-load hang."""
+
+    def test_zero_test_signature_detected(self):
+        """Vitest output with (0 test) on a stuck file triggers the hint."""
+        partial = (
+            " RUN  v2.1.9 C:/project/frontend\n\n"
+            "❯ src/__tests__/PdfViewer.test.jsx (0 test)\n"
+            " ✓ src/__tests__/PdfSearch.test.jsx (20 tests) 191ms\n"
+        )
+        hint = _diagnose_timeout(partial)
+        assert hint, "Expected a hint for (0 test) signature"
+        assert "PdfViewer.test.jsx" in hint
+        assert "module" in hint.lower()
+        assert "isolat" in hint.lower()  # "isolation" or "isolate"
+
+    def test_hint_names_the_exact_stuck_file(self):
+        """Stuck filename is extracted from the ❯ line and included in the hint."""
+        partial = "❯ src/__tests__/HangingSpec.test.ts (0 test)\n✓ other.test.ts (5 tests) 40ms"
+        hint = _diagnose_timeout(partial)
+        assert "HangingSpec.test.ts" in hint
+
+    def test_zero_test_takes_priority_over_watch_mode_pattern(self):
+        """(0 test) hint fires even when watch-mode text also appears — gives the more specific hint."""
+        partial = (
+            "❯ src/__tests__/PdfViewer.test.jsx (0 test)\n"
+            "watch mode enabled\nPress a to run all tests"
+        )
+        hint = _diagnose_timeout(partial)
+        # Should get the targeted (0 test) hint, not the generic watch-mode one
+        assert "PdfViewer.test.jsx" in hint
+        assert "module" in hint.lower()
