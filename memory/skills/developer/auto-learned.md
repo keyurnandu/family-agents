@@ -256,7 +256,16 @@ Never use `CI=true npx vitest` syntax on Windows CMD; instead use `set CI=true &
 Always increase test timeout from 3ms to a realistic value (e.g., 10000ms) and bash timeout from 120s to at least 300s when running full integration test suites with verbose reporting.
 
 ### [2026-05-24 14:00] via lesson
-Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the `❯ filename (0 test)` progress bar that reveals stuck files. A silently hung file produces zero verbose output, making the failure completely invisible until the 120s timeout fires. Use the default reporter or `--reporter=dot` for full suite runs. Reserve `--reporter=verbose` for single-file runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the `❯ filename (0 test)` progress bar that reveals stuck files. A silently hung file produces zero verbose output, making the failure completely invisible until the 120s timeout fires. Use the DEFAULT reporter (no flag) for full suite runs. Reserve `--reporter=verbose` for single-file runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+
+### [2026-05-24 15:00] via user-correction
+NEVER use `--reporter=dot` OR `--reporter=verbose` for a full `npx vitest run` suite — both suppress the `❯ filename (0 test)` progress indicator that timeout diagnosis relies on to name the stuck file. Without it, a module-load hang produces no diagnostic output: the timeout fires, the generic 'slow build' fallback triggers, and the agent loops forever retrying the same failing command. ALWAYS use the DEFAULT reporter (no `--reporter` flag): `npx vitest run`. Reserve non-default reporters for SINGLE-FILE runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
 
 ### [2026-05-24 14:00] via lesson
 Never write markdown formatting into code files. When writing a .jsx, .js, .ts, .py or other code file, include ONLY the code — never the triple-backtick fences (```) or prose lines like "Now run the following:" or "Here is the implementation:". These are valid in a markdown response but are syntax errors when written to a code file. The file write is rejected immediately with FILE REJECTED if markdown artifacts are detected.
+
+### [2026-05-24 13:51] via lesson
+Always identify which test file is hanging when `npx vitest run` times out; PdfViewer.test.jsx showing "0 test" indicates it's stuck in setup/teardown. Increase the timeout to 180-240s for test suites involving file I/O operations like PDF parsing.
+
+### [2026-05-24 14:00] via lesson
+Before running `npx vitest run` on full test suites, increase BASH_TIMEOUT_SECONDS beyond 120s or install the `canvas` npm package to prevent bash-level timeout when jsdom's missing canvas context delays test completion.

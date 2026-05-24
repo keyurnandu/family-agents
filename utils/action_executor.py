@@ -344,6 +344,29 @@ def _diagnose_timeout(partial_output: str) -> str:
             f"these crash or hang in jsdom/vitest before any test can run."
         )
 
+    # ── vitest dot-reporter silent hang ─────────────────────────────────
+    # With --reporter=dot vitest prints dots (.) for each passing test but
+    # emits no ❯ progress bar and no ✓ src/ lines. A file stuck at module-
+    # load time silently stops the dots — no indicator of which file hung.
+    # The slow-op fallback then fires on esbuild "bundling"/"compiling"
+    # output, causing an infinite retry loop with a useless diagnosis.
+    # Detect: vitest RUN header present, a line of 2+ dots exists,
+    # no "Test Files" summary, and no ❯ bar (default reporter already
+    # caught above via the zero-test check).
+    if (re.search(r"\bRUN\b", partial_output)
+            and re.search(r"^\s*\.{2,}", partial_output, re.MULTILINE)
+            and "Test Files" not in partial_output
+            and "❯" not in partial_output):
+        return (
+            "Vitest dot reporter shows test progress (dots) but no 'Test Files' "
+            "summary printed — one test file is silently stuck at module-load time. "
+            "The --reporter=dot flag hides the '❯ filename (0 test)' indicator "
+            "that names the stuck file. "
+            "STOP using --reporter=dot. Re-run with the DEFAULT reporter "
+            "(no --reporter flag): `npx vitest run` — the stuck file will then "
+            "appear as '❯ filename (0 test)' in the output."
+        )
+
     for pattern, hint in _INTERACTIVE_OUTPUT_HINTS:
         if pattern.search(partial_output):
             return hint

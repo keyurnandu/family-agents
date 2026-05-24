@@ -314,6 +314,54 @@ class TestDiagnoseTimeoutVerboseMode:
         assert "verbose" in hint.lower()
 
 
+class TestDiagnoseTimeoutDotMode:
+    """_diagnose_timeout detects silent hang when --reporter=dot hides the ❯ bar."""
+
+    def test_dot_reporter_hang_detected(self):
+        """Dot reporter with no 'Test Files' summary triggers the hint."""
+        partial = (
+            " RUN  v2.1.9 C:/project/frontend\n\n"
+            " .......................\n"
+        )
+        hint = _diagnose_timeout(partial)
+        assert hint, "Expected a hint for dot-reporter silent hang"
+        assert "dot" in hint.lower()
+
+    def test_dot_hint_advises_default_reporter(self):
+        """Hint must tell the agent to remove --reporter=dot and use the default."""
+        partial = " RUN  v2.1.9 C:/project/frontend\n .....\n"
+        hint = _diagnose_timeout(partial)
+        assert "dot" in hint.lower()
+        assert "default" in hint.lower() or "no --reporter" in hint.lower() or "no flag" in hint.lower()
+
+    def test_no_false_positive_when_summary_present(self):
+        """If 'Test Files' summary IS present, the dot hint must NOT fire."""
+        partial = (
+            " RUN  v2.1.9 C:/project/frontend\n\n"
+            " .......................\n"
+            "\n Test Files  5 passed (5)\n Tests  22 passed (22)\n"
+        )
+        hint = _diagnose_timeout(partial)
+        assert "dot" not in hint.lower()
+
+    def test_no_false_positive_without_run_header(self):
+        """Dots in non-vitest output (e.g. progress bars) must NOT trigger the hint."""
+        partial = "Downloading...\n.....\nDone.\n"
+        hint = _diagnose_timeout(partial)
+        assert "dot" not in hint.lower()
+
+    def test_dot_takes_priority_over_slow_op_fallback(self):
+        """Dot-reporter hint must fire instead of the generic slow build fallback."""
+        partial = (
+            " RUN  v2.1.9 C:/project/frontend\n"
+            " .......................\n"
+            "bundling 45 modules\n"   # would normally trigger slow-op fallback
+        )
+        hint = _diagnose_timeout(partial)
+        assert "dot" in hint.lower()
+        assert "slow build" not in hint.lower()
+
+
 class TestMarkdownArtifactDetection:
     """_has_markdown_artifacts() catches stray markdown written into code files."""
 
