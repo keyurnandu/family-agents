@@ -48,7 +48,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-236 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
+280 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, blocking command detection, timeout diagnosis, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
 
 ---
 
@@ -175,6 +175,8 @@ Paste mode opened — paste your content below, then type /end to send.
 | `/switch _general` | Switch to the general chat workspace |
 | `/new <name>` | Create and switch to a brand new project |
 | `/clear` | Reset context window — keeps all memory and history |
+| `/clear-history` | Delete all conversation messages from the DB for the current project — memory, docs, and skills are untouched |
+| `/clear-history N` | Delete only the last N messages — useful for pruning a bad exchange without wiping the full history |
 | `/redo` | Re-send or edit your last message — pre-filled prompt, press Enter to re-send or type a correction |
 | `/paste` | Open paste mode — type or paste multi-line content, then `/end` to send as one message |
 | `/end` | Close paste mode and send everything as a single message |
@@ -295,6 +297,9 @@ The token bar turns yellow at 50% and red at 80% — a signal to consider `/clea
 | Safe bash (npm install, pytest, etc.) | ⚡ Auto-approved | Prompt (Allow?) |
 | **Destructive bash** (rm -rf, DROP TABLE, git push --force, etc.) | **Always prompts** | Prompt (Allow?) |
 | **Path escape** (commands/files referencing paths outside the project) | **Blocked** | **Blocked** |
+| **Blocking commands** (vite, npm start, npm test without CI=, jest watch, vitest without `run`, flask run, uvicorn, nodemon) | **Blocked** | **Blocked** |
+
+Blocking commands are caught before the approval prompt and returned to the agent with the correct non-interactive alternative (`vitest run`, `set CI=true && npm test`, `vite build`, etc.) so it can self-correct without human intervention.
 
 ### Always-on auto-pilot
 
@@ -434,6 +439,24 @@ tests/test_api.py ..........   [100%]
 Sam's next response will say "All 25 tests passed — implementation is complete" because he actually read the output, not just "the command ran".
 
 If a test fails, Sam sees the full traceback and fixes the issue immediately. **Never ask an agent to "run pytest and tell me the results"** — use `EXEC:bash` so the agent sees the output directly.
+
+### Timeout diagnosis
+
+If a command times out (120s cap), the agent doesn't just receive a bare `BASH FAILED (timed out)` message. The executor:
+
+1. **Captures partial output** buffered before the kill and shows the last 15 lines (yellow)
+2. **Auto-diagnoses the cause** by scanning the partial output for known stuck-patterns:
+
+| Partial output contains | Hint shown |
+|---|---|
+| `Watch Usage` / `Press a to run all tests` | Process entered watch mode — use `vitest run` or `set CI=true && npm test` |
+| `Username for` / `Password for` / `Enter passphrase` | Process is waiting for credentials |
+| `ready in 312ms` / `server running` | Process started a dev server — use a build command instead |
+| `watching files for changes` | Process is watching the filesystem |
+| `installing` / `compiling` / `bundling` | Slow build/install — consider splitting |
+| *(no output at all)* | Likely watch/interactive mode — check if a non-interactive flag is needed |
+
+The hint appears both on screen and in the outcome string the agent reads, so it can self-correct without human explanation.
 
 ---
 
@@ -786,7 +809,7 @@ family-agents/
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 236 tests — all TDD, run with `pytest`
+├── tests/                    # 280 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
 │   ├── test_claude_client.py # CLI check caching
@@ -803,7 +826,10 @@ family-agents/
 │   ├── test_role_trim.py     # Shared EXEC instructions, role file limits
 │   ├── test_peer_consult.py  # Bench agent consultation via ASK_COLLEAGUE
 │   ├── test_path_length.py   # Windows path normalization (WinError 206, multi-dir)
-│   └── test_export_doc.py    # Doc export: update existing, no truncation
+│   ├── test_export_doc.py    # Doc export: update existing, no truncation
+│   ├── test_auto_mode.py     # Auto-pilot checkpoints, /auto mode, skill consolidation, user-input guard
+│   ├── test_db_manager.py    # delete_last_n_messages, persistent connection, CRUD
+│   └── test_blocking_commands.py  # is_blocking_bash() and _diagnose_timeout() — 44 tests
 ├── config/
 │   └── settings.yaml         # Model, team roster, agent personas
 ├── pytest.ini                # Test configuration

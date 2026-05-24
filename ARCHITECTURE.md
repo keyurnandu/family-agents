@@ -25,6 +25,7 @@ flowchart TD
         CMD -->|/model alias| MODEL_SW[Switch model\nhaiku · sonnet · opus]
         CMD -->|/retrospective| RETRO_CMD[Per-agent reflection]
         CMD -->|/feedback agent text| FB_CMD[Inject lesson directly]
+        CMD -->|/clear-history N| CLRHIST[Delete last N messages\nfrom DB · memory untouched]
         CMD -->|/new · /switch| PROJ_SW[Project management\nSQLite]
         CLI_IN -->|plain message| PROCESS
     end
@@ -88,7 +89,7 @@ flowchart TD
 
         AE_PARSE --> FILE_PATH[EXEC:file:path\nShow diff stats table\nNEW +added  EDIT +added -removed\nd=show full diff  y=apply  N=skip\nOne collective prompt for batch]
 
-        AE_PARSE --> BASH_PATH[EXEC:bash\nIndividual confirm prompt\nnormalize_bash_command strips abs paths\nsubprocess capture_output=True\nprint to terminal AND inject to outcomes\ncapped at 3000 chars]
+        AE_PARSE --> BASH_PATH[EXEC:bash\nLayer 1: is_blocking_bash check\nvite·npm-start·npm-test-watch·jest·vitest·flask·uvicorn·nodemon\n→ BASH BLOCKED + safe alternative before prompt\nLayer 2: is_path_escape_bash check\nLayer 3: Individual confirm prompt\nnormalize_bash_command strips abs paths\nsubprocess capture_output=True\nprint to terminal AND inject to outcomes\ncapped at 3000 chars\nOn timeout: capture partial stdout/stderr\n_diagnose_timeout → hint injected into outcome]
 
         FILE_PATH -->|approved| FILE_WRITE[Write files to disk\nproject_dir / path]
 
@@ -241,4 +242,6 @@ flowchart TD
 | **Routing doc-index cache** | `_routing_doc_index()` caches the title/first-line docs index by doc path, mtime, and size, avoiding repeated markdown reads across unchanged routing prompts |
 | **Project dir auto-scan** | Projects created within family-agents (not `/load`ed) previously had zero file visibility — agents couldn't see folder trees or use READ_FILE. Now `process()` auto-scans `projects/<name>/` each turn when no external codebase is loaded, setting `loaded_path` and `codebase_context` transiently. Shared `_SCAN_IGNORE` constant filters venv/node_modules from both the folder tree and `_update_project_state` file listing |
 | **Auto skill consolidation** | On the first `process()` call each session, `_consolidate_skills_if_needed()` checks every active agent's `auto-learned.md`. If a file exceeds `_CONSOLIDATION_THRESHOLD` (1,800 chars) and has at least `_CONSOLIDATION_MIN_LESSONS` (6) lessons, Haiku merges redundant lessons, drops stale/contradictory ones, and compresses to ≤30% of the original count. 7-day cooldown via `.bak` mtime — skips if last consolidation was within `_CONSOLIDATION_COOLDOWN_DAYS`. Each consolidation writes a timestamped archive (`auto-learned.YYYYMMDD.bak`) alongside the plain `.bak` — no learnings are ever lost. New lessons accumulate between consolidations and are included in the next compression pass. Graceful on failure |
-| **Test suite** | 236 pytest tests covering all optimizations — all written TDD (red→green), run with zero LLM dependencies |
+| **Blocking command guard** | `is_blocking_bash()` checks every EXEC:bash command against `_BLOCKING_PATTERNS` before the approval prompt. Blocks: vite (not `vite build`), `npm start`/`run dev`, `npm test` without `CI=` or `--watchAll=false`, `jest` without `--ci`, `vitest` without `run`, `flask run`, `uvicorn`, `manage.py runserver`, `nodemon`. Returns a clear error and the correct non-interactive alternative. CI= prefix edge case handled whole-command (not just forward lookahead) |
+| **Timeout diagnosis** | When `subprocess.run()` raises `TimeoutExpired`, the handler decodes partial `.stdout`/`.stderr` buffered before the kill, shows the last 15 lines (yellow), then calls `_diagnose_timeout()` which scans the partial output for interactive-mode signatures (watch mode, credential prompts, server startup, file watchers, slow builds). The plain-English hint is appended to both the console output and the `BASH FAILED` outcome string — so the agent can self-correct without human explanation. No-output fallback: if the process produced nothing, the hint says the process likely started in watch/interactive mode |
+| **Test suite** | 280 pytest tests covering all optimizations — all written TDD (red→green), run with zero LLM dependencies |
