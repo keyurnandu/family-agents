@@ -433,6 +433,17 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd == "/clear":
                 orchestrator.clear_context()
 
+            elif cmd.startswith("/clear-history"):
+                parts = cmd.split(maxsplit=1)
+                if len(parts) > 1:
+                    try:
+                        n = int(parts[1].strip())
+                        orchestrator.clear_history(last_n=n)
+                    except ValueError:
+                        console.print("[yellow]Usage: /clear-history [N]  (N must be a number)[/yellow]")
+                else:
+                    orchestrator.clear_history()
+
             elif cmd == "/redo":
                 # Re-submit or edit the last interrupted/sent message
                 last = orchestrator.last_user_input

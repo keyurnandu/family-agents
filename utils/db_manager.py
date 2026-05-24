@@ -159,6 +159,24 @@ class DBManager:
         )
         self.conn.commit()
 
+    def delete_last_n_messages(self, project_name: str, n: int) -> int:
+        """Delete the last N messages for a project. Returns count deleted."""
+        if n <= 0:
+            return 0
+        cursor = self.conn.execute(
+            "SELECT id FROM messages WHERE project_name = ? ORDER BY id DESC LIMIT ?",
+            (project_name, n),
+        )
+        ids = [row[0] for row in cursor.fetchall()]
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        self.conn.execute(
+            f"DELETE FROM messages WHERE id IN ({placeholders})", ids
+        )
+        self.conn.commit()
+        return len(ids)
+
     def close(self):
         if self.conn:
             self.conn.close()

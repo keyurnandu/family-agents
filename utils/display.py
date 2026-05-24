@@ -306,6 +306,8 @@ class Display:
             "  [cyan]/memory[/cyan]            Show project memory\n"
             "  [cyan]/history[/cyan]           Show recent conversation\n"
             "  [cyan]/clear[/cyan]             Clear context window (keeps memory)\n"
+            "  [cyan]/clear-history[/cyan]     Wipe all DB messages (keeps memory, docs, skills)\n"
+            "  [cyan]/clear-history N[/cyan]   Delete only the last N messages from DB\n"
             "  [cyan]/redo[/cyan]              Re-send or edit the last message (useful after Ctrl+C)\n"
             "  [cyan]/paste[/cyan]             Open paste mode for multi-line input\n"
             "  [cyan]/end[/cyan]               Close paste mode and send as one message\n"

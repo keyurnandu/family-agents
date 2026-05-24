@@ -3122,3 +3122,29 @@ class Orchestrator:
     def clear_context(self):
         self.messages = []
         console.print("[dim]Context cleared. DB history and project memory preserved.[/dim]")
+
+    def clear_history(self, last_n: int | None = None):
+        """Clear conversation history from the DB.
+
+        - ``last_n is None`` → wipe ALL messages for this project
+        - ``last_n > 0``     → delete only the last N messages
+        """
+        if last_n is not None:
+            if last_n <= 0:
+                console.print("[yellow]Usage: /clear-history <N> where N > 0[/yellow]")
+                return
+            deleted = self.db.delete_last_n_messages(self.project_name, last_n)
+            # Also trim the in-memory list
+            if deleted > 0:
+                self.messages = self.messages[:-deleted] if deleted < len(self.messages) else []
+            console.print(
+                f"[dim]Deleted last {deleted} message(s) from DB. "
+                f"Memory, docs, and skills untouched.[/dim]"
+            )
+        else:
+            self.db.delete_project_messages(self.project_name)
+            self.messages = []
+            console.print(
+                "[dim]All conversation history deleted from DB. "
+                "Memory, docs, and skills untouched.[/dim]"
+            )

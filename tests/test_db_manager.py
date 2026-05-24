@@ -92,6 +92,42 @@ class TestDBOperations:
         assert db.get_project("deleteme") is None
         db.close()
 
+    def test_delete_last_n_messages(self, db_path):
+        """delete_last_n_messages should remove only the last N entries."""
+        db = DBManager(db_path)
+        db.ensure_project("proj")
+        for i in range(10):
+            db.save_message("proj", "user", f"msg {i}")
+        deleted = db.delete_last_n_messages("proj", 3)
+        assert deleted == 3
+        history = db.load_history("proj", limit=100)
+        # Should have 7 left, and the last 3 (msg 7,8,9) should be gone
+        assert len(history) == 7
+        assert history[-1]["content"] == "msg 6"
+        db.close()
+
+    def test_delete_last_n_more_than_exists(self, db_path):
+        """Deleting more than exists should delete all, not error."""
+        db = DBManager(db_path)
+        db.ensure_project("proj")
+        db.save_message("proj", "user", "only one")
+        deleted = db.delete_last_n_messages("proj", 100)
+        assert deleted == 1
+        history = db.load_history("proj", limit=100)
+        assert len(history) == 0
+        db.close()
+
+    def test_delete_last_n_zero(self, db_path):
+        """Deleting 0 messages should be a no-op."""
+        db = DBManager(db_path)
+        db.ensure_project("proj")
+        db.save_message("proj", "user", "keep me")
+        deleted = db.delete_last_n_messages("proj", 0)
+        assert deleted == 0
+        history = db.load_history("proj", limit=100)
+        assert len(history) == 1
+        db.close()
+
 
 # ── Failure logging ────────────────────────────────────────────────
 
