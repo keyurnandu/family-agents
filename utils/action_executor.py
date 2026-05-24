@@ -42,6 +42,72 @@ from rich.text import Text
 
 console = Console()
 
+# ── Blocking command detection ─────────────────────────────────────────
+# Commands that start interactive / watch-mode processes and never exit.
+# These are ALWAYS blocked — there is no scenario where running them in
+# an EXEC:bash block is useful. The agent should use a build or CI command
+# instead (e.g. `vite build`, `vitest run`, `npm test -- --watchAll=false`).
+_BLOCKING_PATTERNS = [
+    # JavaScript dev servers
+    re.compile(r"\bvite\b(?!\s+build)", re.IGNORECASE),          # vite / vite dev (not vite build)
+    re.compile(r"\bnpm\s+(?:run\s+)?(?:start|dev)\b", re.IGNORECASE),  # npm start, npm run dev
+    re.compile(r"\byarn\s+(?:start|dev)\b", re.IGNORECASE),      # yarn start, yarn dev
+    # Jest / Vitest in watch mode
+    re.compile(r"\bnpm\s+test\b(?!.*--watchAll=false)(?!.*CI=)", re.IGNORECASE),  # npm test without --watchAll=false or CI=
+    re.compile(r"\bvitest\b(?!\s+run)", re.IGNORECASE),           # vitest (not vitest run)
+    re.compile(r"\bjest\b(?!.*--watchAll=false)(?!.*--ci)", re.IGNORECASE),  # jest without --watchAll=false or --ci
+    # Python / other servers
+    re.compile(r"\bflask\s+run\b", re.IGNORECASE),
+    re.compile(r"\buvicorn\b(?!.*--reload\s+False)", re.IGNORECASE),
+    re.compile(r"\bpython\s+.*manage\.py\s+runserver\b", re.IGNORECASE),
+    re.compile(r"\bnodemon\b", re.IGNORECASE),
+]
+
+_BLOCKING_SAFE_REPLACEMENTS = {
+    "npm test": "set CI=true && npm test -- --verbose",
+    "vitest": "node_modules\\.bin\\vitest run --reporter=verbose",
+    "vite": "node_modules\\.bin\\vite build",
+    "jest": "npm test -- --watchAll=false --verbose",
+}
+
+
+def is_blocking_bash(cmd: str) -> bool:
+    """Return True if the command starts an interactive/watch process that never exits.
+
+    Whole-command safety overrides are checked first so that patterns like
+    ``set CI=true && npm test -- --verbose`` (where CI= precedes npm test)
+    are correctly treated as safe even though the negative lookahead in the
+    npm-test pattern only looks *forward*.
+    """
+    # ``vitest run`` and ``vite build`` are always safe — check before patterns
+    if re.search(r"\bvitest\s+run\b", cmd, re.IGNORECASE):
+        return False
+    if re.search(r"\bvite\s+build\b", cmd, re.IGNORECASE):
+        return False
+
+    # CI= anywhere in the command makes npm test / jest non-blocking (watch disabled)
+    # but dev-server patterns (vite dev, npm start, uvicorn …) are still blocked.
+    ci_anywhere = bool(re.search(r"(?:^|[\s&;|])(?:set\s+)?CI=", cmd, re.IGNORECASE))
+    if ci_anywhere:
+        # Only check the server/daemon patterns; skip npm-test (3) and jest (5)
+        # because CI= makes those exit after one run.
+        # Still block: vite-dev (0), npm-start (1), yarn-start (2),
+        #              vitest-watch (4), flask (6), uvicorn (7), runserver (8), nodemon (9)
+        server_patterns = (
+            _BLOCKING_PATTERNS[0],   # vite (not vite build)
+            _BLOCKING_PATTERNS[1],   # npm run start/dev
+            _BLOCKING_PATTERNS[2],   # yarn start/dev
+            _BLOCKING_PATTERNS[4],   # vitest (not vitest run) — CI= alone doesn't exit vitest
+            _BLOCKING_PATTERNS[6],   # flask run
+            _BLOCKING_PATTERNS[7],   # uvicorn
+            _BLOCKING_PATTERNS[8],   # manage.py runserver
+            _BLOCKING_PATTERNS[9],   # nodemon
+        )
+        return any(p.search(cmd) for p in server_patterns)
+
+    return any(p.search(cmd) for p in _BLOCKING_PATTERNS)
+
+
 # ── Destructive command detection ──────────────────────────────────────
 # Commands that can cause irreversible data loss. In /auto mode, these
 # are the ONLY bash commands that still require manual confirmation.
@@ -454,6 +520,28 @@ def prompt_and_execute(
             outcomes.append(
                 f"BASH BLOCKED: {action.label} — references paths outside the project directory. "
                 f"Only use relative paths or paths inside {project_dir}"
+            )
+            continue
+
+        # Block commands that start interactive/watch processes and never exit
+        if is_blocking_bash(action.content):
+            console.print(
+                "[bold red]  ✗ BLOCKED — this command starts an interactive process "
+                "that never exits[/bold red]"
+            )
+            console.print(
+                "[dim]  Use a non-interactive alternative:\n"
+                "  • Jest:    set CI=true && npm test -- --verbose\n"
+                r"  • Vitest:  node_modules\.bin\vitest run --reporter=verbose"
+                "\n"
+                r"  • Vite:    node_modules\.bin\vite build"
+                "\n"
+                "  • uvicorn: import the app in Python and check it starts\n"
+                "  • Flask:   python -c \"from app import create_app; create_app()\"[/dim]"
+            )
+            outcomes.append(
+                f"BASH BLOCKED: {action.label} — starts an interactive/watch process that never exits. "
+                "Use CI=true npm test, vitest run, or vite build instead."
             )
             continue
 
