@@ -1951,3 +1951,47 @@ class TestSkillConsolidation:
         assert path.read_text(encoding="utf-8") == original_content
         # No backup created
         assert not path.with_suffix(".md.bak").exists()
+
+    def test_consolidation_skips_within_cooldown(self, base_dir, config):
+        """Consolidation should skip if a .bak file exists and is recent."""
+        import time
+
+        orch = self._make_orch(base_dir, config)
+        path = self._write_big_skill_file(base_dir, "developer", 40)
+
+        # Create a recent .bak file (simulates consolidation happened today)
+        backup = path.with_suffix(".md.bak")
+        backup.write_text("old backup content", encoding="utf-8")
+
+        with patch("orchestrator.call_claude") as mock_claude:
+            orch._consolidate_skills_if_needed()
+
+        # Haiku should NOT have been called — cooldown is active
+        mock_claude.assert_not_called()
+
+    def test_consolidation_runs_after_cooldown_expires(self, base_dir, config):
+        """Consolidation should run if the .bak file is older than the cooldown."""
+        import os
+        import time
+
+        orch = self._make_orch(base_dir, config)
+        path = self._write_big_skill_file(base_dir, "developer", 40)
+
+        # Create an old .bak file (8 days ago)
+        backup = path.with_suffix(".md.bak")
+        backup.write_text("old backup content", encoding="utf-8")
+        old_time = time.time() - (8 * 86400)
+        os.utime(backup, (old_time, old_time))
+
+        consolidated_mock = (
+            "# Auto-Learned Lessons — developer\n\n"
+            "### [2026-05-29 10:00] via bash-failure\n"
+            "Always verify imports exist before running pytest.\n"
+        )
+
+        with patch("orchestrator.call_claude", return_value=consolidated_mock):
+            orch._consolidate_skills_if_needed()
+
+        # Should have consolidated (backup overwritten with new content)
+        new_content = path.read_text(encoding="utf-8")
+        assert "lesson 0" not in new_content  # original lessons replaced

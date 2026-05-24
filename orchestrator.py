@@ -730,11 +730,17 @@ class Orchestrator:
 
     # Consolidation fires when an auto-learned.md exceeds this many chars.
     _CONSOLIDATION_THRESHOLD = 3000
+    # Minimum days between consolidation runs (checked via .bak mtime).
+    _CONSOLIDATION_COOLDOWN_DAYS = 7
 
     def _consolidate_skills_if_needed(self) -> None:
         """Check every active agent's auto-learned file; consolidate if large.
 
-        Runs once per session (guarded by ``_skills_consolidated``).
+        Runs at most once per ``_CONSOLIDATION_COOLDOWN_DAYS`` (checked via
+        the ``.bak`` file's mtime).  Within a session, guarded by
+        ``_skills_consolidated`` so the check is a single stat() call on
+        subsequent ``process()`` calls.
+
         Uses Haiku to merge redundant lessons, remove stale ones, and
         compress — keeping the file concise and token-efficient.
         Backs up the original to ``.bak`` before overwriting.
@@ -743,16 +749,27 @@ class Orchestrator:
             return
         self._skills_consolidated = True
 
+        import time
         from agents.agent import Agent
 
         skills_dir = self.memory._skills_dir
         if not skills_dir.exists():
             return
 
+        cooldown_seconds = self._CONSOLIDATION_COOLDOWN_DAYS * 86400
+
         for role in list(self.agents.keys()):
             learned_path = skills_dir / role / "auto-learned.md"
             if not learned_path.exists():
                 continue
+
+            # Cooldown check — skip if last consolidation was recent
+            backup_path = learned_path.with_suffix(".md.bak")
+            if backup_path.exists():
+                age = time.time() - backup_path.stat().st_mtime
+                if age < cooldown_seconds:
+                    continue
+
             content = learned_path.read_text(encoding="utf-8")
             if len(content) < self._CONSOLIDATION_THRESHOLD:
                 continue
