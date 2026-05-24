@@ -818,7 +818,14 @@ class Orchestrator:
             if not consolidated or len(consolidated.strip()) < 100:
                 continue  # sanity check — don't overwrite with empty/tiny result
 
-            # Back up original, write consolidated version
+            # Back up original with timestamped name, then write consolidated.
+            # The plain .bak is also written — its mtime drives the cooldown.
+            from datetime import datetime
+            ts = datetime.now().strftime("%Y%m%d")
+            versioned_bak = learned_path.with_suffix(f".{ts}.bak")
+            if not versioned_bak.exists():
+                versioned_bak.write_text(content, encoding="utf-8")
+            # Plain .bak — used for cooldown mtime check
             backup_path = learned_path.with_suffix(".md.bak")
             backup_path.write_text(content, encoding="utf-8")
             learned_path.write_text(consolidated.strip() + "\n", encoding="utf-8")

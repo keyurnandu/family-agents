@@ -1901,10 +1901,16 @@ class TestSkillConsolidation:
         # Should have written consolidated content
         new_content = path.read_text(encoding="utf-8")
         assert len(new_content) < len(original_content)
-        # Should have created a backup
+        # Should have created a plain .bak (cooldown marker)
         backup = path.with_suffix(".md.bak")
         assert backup.exists()
         assert backup.read_text(encoding="utf-8") == original_content
+        # Should have created a versioned .YYYYMMDD.bak (permanent archive)
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d")
+        versioned = path.with_suffix(f".{ts}.bak")
+        assert versioned.exists()
+        assert versioned.read_text(encoding="utf-8") == original_content
 
     def test_consolidation_skips_small_files(self, base_dir, config):
         """Consolidation should not run on files below the threshold."""
