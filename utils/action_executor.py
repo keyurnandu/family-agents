@@ -19,9 +19,12 @@ NEW / +added -removed lines. One "apply all?" prompt for the whole batch.
 Bash commands are confirmed individually.
 """
 import difflib
+import queue
 import re
 import subprocess
 import sys
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -107,6 +110,139 @@ def is_blocking_bash(cmd: str) -> bool:
         return any(p.search(cmd) for p in server_patterns)
 
     return any(p.search(cmd) for p in _BLOCKING_PATTERNS)
+
+
+# ── Streaming bash execution ────────────────────────────────────────────
+# Run a shell command and stream stdout+stderr to the console as lines
+# arrive, so the user can see progress (or recognise that a process is
+# stuck) without waiting for the full timeout.
+
+# Seconds of zero output before showing the "no output" idle warning.
+_IDLE_WARNING_SECS = 20
+
+
+def _run_bash_streaming(
+    safe_cmd: str,
+    project_dir: str,
+    timeout_secs: int,
+    _console: Console,
+) -> tuple[int | None, str, bool]:
+    """Run *safe_cmd* in a subprocess, streaming every output line to
+    *_console* as it arrives.
+
+    Returns ``(returncode, full_output, timed_out)``.
+    *returncode* is ``None`` when the process was killed by the timeout.
+    *full_output* is the merged stdout+stderr captured before termination.
+    *timed_out* is ``True`` when the hard ceiling was hit.
+
+    Design notes
+    ~~~~~~~~~~~~
+    * stdout and stderr are merged via ``stderr=STDOUT`` — one reader
+      thread instead of two, which avoids deadlocks on Windows pipes.
+    * A background daemon thread drains the pipe into a ``queue.Queue``
+      so the main thread can enforce the hard ceiling without blocking
+      on ``readline()``.
+    * The main loop polls every 0.5 s; if no line arrives for
+      ``_IDLE_WARNING_SECS`` seconds, a yellow warning is printed so the
+      user knows the process is not producing output (classic sign of a
+      watch-mode / interactive command that slipped past the pattern guard).
+    * An elapsed-time ticker (``\\r`` overwrite) shows the user the
+      command is still running.
+    """
+    line_queue: queue.Queue = queue.Queue()
+
+    try:
+        proc = subprocess.Popen(
+            safe_cmd,
+            shell=True,
+            cwd=project_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,   # merge so one thread suffices
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+    except OSError as exc:
+        return 1, f"Failed to start process: {exc}", False
+
+    def _reader() -> None:
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line_queue.put(line)
+        finally:
+            line_queue.put(None)   # sentinel — EOF reached
+
+    reader = threading.Thread(target=_reader, daemon=True)
+    reader.start()
+
+    collected: list[str] = []
+    start_time = time.monotonic()
+    last_output_time = start_time
+    idle_warned = False
+    timed_out = False
+
+    while True:
+        elapsed = time.monotonic() - start_time
+
+        if elapsed >= timeout_secs:
+            proc.kill()
+            timed_out = True
+            break
+
+        try:
+            line = line_queue.get(timeout=0.5)
+        except queue.Empty:
+            # ── Idle ticker ─────────────────────────────────────────────
+            idle_secs = time.monotonic() - last_output_time
+            # Overwrite the same terminal line with elapsed counter
+            _console.print(
+                f"  [dim]running… {int(elapsed)}s[/dim]",
+                end="\r",
+                highlight=False,
+            )
+            if idle_secs >= _IDLE_WARNING_SECS and not idle_warned:
+                idle_warned = True
+                _console.print(
+                    f"\n  [bold yellow]⚠ No output for {int(idle_secs)}s — "
+                    "process may be waiting for input or running in watch/server mode. "
+                    "Press Ctrl+C to interrupt.[/bold yellow]"
+                )
+            continue
+
+        if line is None:
+            # EOF — process finished normally; flush any remaining items
+            while True:
+                try:
+                    tail = line_queue.get_nowait()
+                    if tail is None:
+                        break
+                    collected.append(tail)
+                    _console.print(tail, end="", markup=False, highlight=False)
+                except queue.Empty:
+                    break
+            break
+
+        # ── Live output line ─────────────────────────────────────────────
+        collected.append(line)
+        last_output_time = time.monotonic()
+        idle_warned = False          # reset warning if output resumes
+        # Clear the ticker (overwrite with spaces) then print the real line
+        _console.print(" " * 60, end="\r")
+        _console.print(line, end="", markup=False, highlight=False)
+
+    # Ensure the process is fully gone before we read returncode
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    reader.join(timeout=2)
+
+    returncode = proc.returncode if not timed_out else None
+    full_output = "".join(collected).strip()
+    return returncode, full_output, timed_out
 
 
 # ── Timeout diagnosis ───────────────────────────────────────────────────
@@ -617,47 +753,26 @@ def prompt_and_execute(
             approved = Confirm.ask("  Allow?", default=False)
 
         if approved:
-            console.print(f"  [dim]Running… {_ts()}[/dim]\n")
+            console.print(f"  [dim]Running… {_ts()}[/dim]")
             # Normalize absolute paths to relative — prevents WinError 206
             # on long OneDrive paths where cmd.exe exceeds MAX_PATH.
             safe_cmd = normalize_bash_command(action.content, project_dir, normalize_dirs)
-            # Capture output so we can: (a) print it for the user, and
-            # (b) inject it back into the agent pipeline so the agent can
-            # reason about test results, errors, etc.
-            try:
-                result = subprocess.run(
-                    safe_cmd,
-                    shell=True,
-                    cwd=project_dir,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=BASH_TIMEOUT_SECONDS,
-                )
-            except subprocess.TimeoutExpired as exc:
-                console.print(
-                    f"  [red]✗ Timed out after {BASH_TIMEOUT_SECONDS}s[/red]\n"
-                )
-                # Decode partial output captured before the process was killed.
-                # exc.stdout / exc.stderr may be bytes (even when text=True was
-                # requested, the exception carries the raw buffer).
-                def _decode(raw) -> str:
-                    if raw is None:
-                        return ""
-                    return raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
 
-                partial = (_decode(exc.stdout) + _decode(exc.stderr)).strip()
+            # ── Stream output live ───────────────────────────────────────
+            # _run_bash_streaming prints every line as it arrives so the
+            # user can see progress (or recognise a stuck/watch process)
+            # without waiting for the full timeout.
+            returncode, output, timed_out = _run_bash_streaming(
+                safe_cmd, project_dir, BASH_TIMEOUT_SECONDS, console
+            )
 
-                if partial:
-                    # Show the last 15 lines so the user can see where it got stuck
-                    tail = "\n".join(partial.splitlines()[-15:])
-                    console.print("  [dim]Last output before timeout:[/dim]")
-                    console.print(Text(tail + "\n", style="dim yellow"), markup=False, highlight=False)
+            console.print()  # blank line after streamed output
 
-                # Auto-diagnose: scan partial output for interactive/stuck markers
-                hint = _diagnose_timeout(partial)
-                if not hint and not partial:
+            if timed_out:
+                console.print(f"  [red]✗ Timed out after {BASH_TIMEOUT_SECONDS}s[/red]\n")
+                # Auto-diagnose: scan the output we did collect for stuck-patterns
+                hint = _diagnose_timeout(output)
+                if not hint and not output:
                     hint = (
                         "No output was produced before the timeout. "
                         "The process likely started in watch/interactive mode or is waiting for input. "
@@ -666,29 +781,18 @@ def prompt_and_execute(
                 if hint:
                     console.print(f"  [bold yellow]Diagnosis:[/bold yellow] [dim]{hint}[/dim]\n")
 
-                # Build the outcome message the agent sees
                 outcome_parts = [
                     f"BASH FAILED (timed out after {BASH_TIMEOUT_SECONDS}s): {action.label}",
                 ]
-                if partial:
-                    snippet = partial[-2000:] if len(partial) > 2000 else partial
+                if output:
+                    snippet = output[-2000:] if len(output) > 2000 else output
                     outcome_parts.append(f"LAST OUTPUT BEFORE TIMEOUT:\n{snippet}")
                 if hint:
                     outcome_parts.append(f"DIAGNOSTIC HINT: {hint}")
                 outcomes.append("\n".join(outcome_parts))
                 continue
 
-            output = (result.stdout + result.stderr).strip()
-
-            # Print the captured output so the user still sees it.
-            # Use markup=False to prevent Rich from parsing bracket
-            # patterns in subprocess output (e.g. "[/raise/not-found]")
-            # as Rich markup tags, which would crash the CLI.
-            if output:
-                console.print(output, markup=False, highlight=False)
-                console.print()
-
-            if result.returncode == 0:
+            if returncode == 0:
                 console.print("  [green]✓ Done[/green]  (exit 0)\n")
                 # Cap output fed back to agents at 3000 chars to avoid token explosion
                 snippet = output[-3000:] if len(output) > 3000 else output
@@ -697,12 +801,12 @@ def prompt_and_execute(
                     else f"BASH OK: {action.label}"
                 )
             else:
-                console.print(f"  [red]✗ Exited {result.returncode}[/red]\n")
+                console.print(f"  [red]✗ Exited {returncode}[/red]\n")
                 snippet = output[-3000:] if len(output) > 3000 else output
                 outcomes.append(
-                    f"BASH FAILED (exit {result.returncode}): {action.label}\nOUTPUT:\n{snippet}"
+                    f"BASH FAILED (exit {returncode}): {action.label}\nOUTPUT:\n{snippet}"
                     if snippet
-                    else f"BASH FAILED (exit {result.returncode}): {action.label}"
+                    else f"BASH FAILED (exit {returncode}): {action.label}"
                 )
         else:
             console.print("  [dim]Skipped.[/dim]")
