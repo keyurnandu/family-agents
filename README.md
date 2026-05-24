@@ -514,6 +514,15 @@ Before writing files that import from a model, verify all referenced symbols exi
 Always scan all files importing from a module before modifying it — fix all callers in one pass.
 ```
 
+### Auto-consolidation
+
+As lessons accumulate, files can get bloated with redundant entries. Aria automatically consolidates them:
+
+- **When**: First `process()` call of a session, if an agent's `auto-learned.md` exceeds 3,000 chars and has 10+ lessons
+- **How**: Haiku merges duplicates, drops stale/contradictory entries, compresses to ≤30% of original count
+- **Cooldown**: 7 days — won't re-consolidate if it ran within the last week
+- **Safety**: Timestamped versioned backups (`auto-learned.YYYYMMDD.bak`) — no learnings are ever lost
+
 ### The compound effect
 
 Each session the team is a little better than the last. Over weeks of use, agents accumulate a detailed, project-specific knowledge base of what works and what doesn't on your machine, in your codebase, with your workflow.
