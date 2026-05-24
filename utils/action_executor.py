@@ -108,6 +108,65 @@ def is_blocking_bash(cmd: str) -> bool:
     return any(p.search(cmd) for p in _BLOCKING_PATTERNS)
 
 
+# ── Timeout diagnosis ───────────────────────────────────────────────────
+# When a command times out, scan partial output for known "stuck" signatures
+# so the agent receives a plain-English hint rather than a bare timeout message.
+
+# Each entry: (pattern to search in partial output, hint string for agent)
+_INTERACTIVE_OUTPUT_HINTS: list[tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"watch\s*usage|press\s+\w+\s+to\s+(?:run|quit)|watch\s+mode", re.IGNORECASE),
+        "Process entered watch/interactive mode. Use 'vitest run' or 'set CI=true && npm test -- --verbose'.",
+    ),
+    (
+        re.compile(r"username\s*(?:for|:)|password\s*(?:for|:)|enter\s+passphrase|credential", re.IGNORECASE),
+        "Process is waiting for credentials. Configure SSH keys or a token and retry.",
+    ),
+    (
+        re.compile(r"^\s*>\s*$", re.MULTILINE),
+        "Process is in a REPL/interactive shell. Do not run interactive interpreters via EXEC.",
+    ),
+    (
+        re.compile(r"press\s+any\s+key|press\s+enter\s+to\s+continue", re.IGNORECASE),
+        "Process is waiting for a keypress. Use non-interactive flags or pipe 'yes' to the command.",
+    ),
+    (
+        re.compile(r"listening\s+on|started\s+server|server\s+running|ready\s+in\s+\d+", re.IGNORECASE),
+        "Process started a long-running server. Use a build command instead (e.g. vite build, gunicorn --workers 1 --timeout 5).",
+    ),
+    (
+        re.compile(r"waiting\s+for\s+changes|watching\s+files|file\s+watcher", re.IGNORECASE),
+        "Process is watching the filesystem. Use a one-shot command that exits after running.",
+    ),
+]
+
+# Patterns in partial output that suggest a slow-but-legitimate operation
+_SLOW_OP_PATTERNS = [
+    re.compile(r"installing|downloading|fetching|resolving\s+packages", re.IGNORECASE),
+    re.compile(r"compiling|bundling|transpiling|building", re.IGNORECASE),
+    re.compile(r"running\s+\d+\s+tests?", re.IGNORECASE),  # "running 847 tests" — in-progress marker
+]
+
+
+def _diagnose_timeout(partial_output: str) -> str:
+    """Return a plain-English hint about why a command timed out.
+
+    Scans the partial output captured before the kill for well-known
+    interactive/stuck signatures. Returns an empty string if no pattern
+    matches (caller falls back to the no-output heuristic).
+    """
+    for pattern, hint in _INTERACTIVE_OUTPUT_HINTS:
+        if pattern.search(partial_output):
+            return hint
+    for pattern in _SLOW_OP_PATTERNS:
+        if pattern.search(partial_output):
+            return (
+                "Process appears to be a slow build / install. "
+                "Consider splitting into smaller steps or increasing BASH_TIMEOUT_SECONDS in action_executor.py."
+            )
+    return ""
+
+
 # ── Destructive command detection ──────────────────────────────────────
 # Commands that can cause irreversible data loss. In /auto mode, these
 # are the ONLY bash commands that still require manual confirmation.
@@ -575,13 +634,47 @@ def prompt_and_execute(
                     errors="replace",
                     timeout=BASH_TIMEOUT_SECONDS,
                 )
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 console.print(
                     f"  [red]✗ Timed out after {BASH_TIMEOUT_SECONDS}s[/red]\n"
                 )
-                outcomes.append(
-                    f"BASH FAILED (timed out after {BASH_TIMEOUT_SECONDS}s): {action.label}"
-                )
+                # Decode partial output captured before the process was killed.
+                # exc.stdout / exc.stderr may be bytes (even when text=True was
+                # requested, the exception carries the raw buffer).
+                def _decode(raw) -> str:
+                    if raw is None:
+                        return ""
+                    return raw if isinstance(raw, str) else raw.decode("utf-8", errors="replace")
+
+                partial = (_decode(exc.stdout) + _decode(exc.stderr)).strip()
+
+                if partial:
+                    # Show the last 15 lines so the user can see where it got stuck
+                    tail = "\n".join(partial.splitlines()[-15:])
+                    console.print("  [dim]Last output before timeout:[/dim]")
+                    console.print(Text(tail + "\n", style="dim yellow"), markup=False, highlight=False)
+
+                # Auto-diagnose: scan partial output for interactive/stuck markers
+                hint = _diagnose_timeout(partial)
+                if not hint and not partial:
+                    hint = (
+                        "No output was produced before the timeout. "
+                        "The process likely started in watch/interactive mode or is waiting for input. "
+                        f"Check if '{action.content.split()[0]}' requires a non-interactive flag."
+                    )
+                if hint:
+                    console.print(f"  [bold yellow]Diagnosis:[/bold yellow] [dim]{hint}[/dim]\n")
+
+                # Build the outcome message the agent sees
+                outcome_parts = [
+                    f"BASH FAILED (timed out after {BASH_TIMEOUT_SECONDS}s): {action.label}",
+                ]
+                if partial:
+                    snippet = partial[-2000:] if len(partial) > 2000 else partial
+                    outcome_parts.append(f"LAST OUTPUT BEFORE TIMEOUT:\n{snippet}")
+                if hint:
+                    outcome_parts.append(f"DIAGNOSTIC HINT: {hint}")
+                outcomes.append("\n".join(outcome_parts))
                 continue
 
             output = (result.stdout + result.stderr).strip()

@@ -1,8 +1,8 @@
-"""Tests for is_blocking_bash() — the guard that prevents agents from running
-interactive / watch-mode processes that never exit.
+"""Tests for is_blocking_bash() and _diagnose_timeout() — guards that prevent
+agents from running interactive processes and help them understand timeouts.
 """
 import pytest
-from utils.action_executor import is_blocking_bash
+from utils.action_executor import is_blocking_bash, _diagnose_timeout
 
 
 class TestBlockedCommands:
@@ -140,3 +140,58 @@ class TestCIEnvDoesNotDisableServers:
     def test_ci_does_not_unblock_vitest_watch(self):
         # vitest without "run" is still watch mode even with CI=
         assert is_blocking_bash("set CI=true && vitest --reporter=verbose") is True
+
+
+class TestDiagnoseTimeout:
+    """_diagnose_timeout() returns actionable hints from partial output."""
+
+    def test_jest_watch_mode_output(self):
+        partial = "Watch Usage\n › Press a to run all tests.\n › Press f to run only failed tests."
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "watch" in hint.lower() or "CI=" in hint or "vitest run" in hint
+
+    def test_credential_prompt(self):
+        partial = "Username for 'https://github.com': "
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "credential" in hint.lower() or "ssh" in hint.lower() or "token" in hint.lower()
+
+    def test_password_prompt(self):
+        partial = "Password for 'https://user@github.com': "
+        hint = _diagnose_timeout(partial)
+        assert hint
+
+    def test_server_started(self):
+        partial = "  VITE v5.0.0  ready in 312 ms\n\n  ➜  Local:   http://localhost:5173/"
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "server" in hint.lower() or "build" in hint.lower()
+
+    def test_file_watcher(self):
+        partial = "watching files for changes..."
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "watch" in hint.lower()
+
+    def test_slow_install(self):
+        partial = "added 1234 packages\ninstalling dependencies..."
+        hint = _diagnose_timeout(partial)
+        assert hint
+        assert "install" in hint.lower() or "build" in hint.lower() or "slow" in hint.lower()
+
+    def test_slow_compile(self):
+        partial = "compiling typescript... 847 files"
+        hint = _diagnose_timeout(partial)
+        assert hint
+
+    def test_no_output_returns_empty(self):
+        # No output — caller is responsible for the "no output" heuristic
+        hint = _diagnose_timeout("")
+        assert hint == ""
+
+    def test_normal_output_no_hint(self):
+        # Regular test output — no interactive pattern
+        partial = "PASS src/App.test.js\n  ✓ renders without crashing (12ms)\n1 test passed"
+        hint = _diagnose_timeout(partial)
+        assert hint == ""
