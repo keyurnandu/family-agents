@@ -783,9 +783,12 @@ def prompt_and_execute(
                     f"[dim]({md_warning})[/dim]"
                 )
                 outcomes.append(
-                    f"FILE REJECTED: {a.label} — {md_warning}. "
-                    "Rewrite the file containing only valid code — no markdown "
-                    "fences (```), no prose instructions after the closing brace."
+                    f"FILE REJECTED — NOT WRITTEN TO DISK: {a.label} — {md_warning}. "
+                    "The file on disk is UNCHANGED — your new content was discarded. "
+                    "You MUST rewrite this file using EXEC:file with ONLY valid code. "
+                    "Do NOT wrap the code in ```python or ```jsx fences — the EXEC: "
+                    "block already provides the delimiters. Write raw code only, "
+                    "no markdown fences, no prose instructions."
                 )
                 continue
             safe_file_actions.append(a)

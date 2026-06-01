@@ -2556,7 +2556,9 @@ class Orchestrator:
                         # Capped at 1 retry per role per phase (no infinite loops).
                         fixable_failures = [
                             o for o in outcomes
-                            if o.startswith("BASH FAILED") or o.startswith("HEALTH_CHECK: FAILED")
+                            if o.startswith("BASH FAILED")
+                            or o.startswith("HEALTH_CHECK: FAILED")
+                            or o.startswith("FILE REJECTED")
                         ]
                         if fixable_failures:
                             retry_outcomes = self._retry_after_lesson(
@@ -2792,7 +2794,9 @@ class Orchestrator:
                 # Auto-retry on failure (same as phase loop)
                 fixable_failures = [
                     o for o in outcomes
-                    if o.startswith("BASH FAILED") or o.startswith("HEALTH_CHECK: FAILED")
+                    if o.startswith("BASH FAILED")
+                    or o.startswith("HEALTH_CHECK: FAILED")
+                    or o.startswith("FILE REJECTED")
                 ]
                 if fixable_failures:
                     retry_outcomes = self._retry_after_lesson(
