@@ -340,6 +340,8 @@ Press **Ctrl+C** at any time to interrupt the auto-pilot loop. Type **continue**
 
 ### Safety guards
 
+Agents never narrate approval steps — they emit `EXEC:` blocks directly and the system handles execution silently. In `/auto` mode, you won't see "awaiting your approval" or "you'll be prompted" messages.
+
 Auto-pilot has four built-in guards that prevent getting stuck:
 
 | Guard | What it does |
@@ -846,18 +848,14 @@ family-agents/
 
 ## Where Project Files Go
 
-When an agent creates a file or runs a command, a permission prompt appears in your terminal before anything executes:
+When an agent creates a file or runs a command, the system handles execution based on your approval mode:
 
-```
-💻 Sam wants to write  src/app.py
-╭─ Create  src/app.py ─────────────────────╮
-│  1  def main():                           │
-│  2      print("Hello!")                   │
-╰──────────────────────────────────────────╯
-  Allow? [y/N]:
-```
+- **`/auto on`**: file writes and safe bash commands execute automatically — no prompt, no narration
+- **`/auto off`** (default): a permission prompt appears before each action
 
-All approved files are written to:
+Agents never mention approval or permissions in their responses — they just emit `EXEC:` blocks and the system handles the rest silently.
+
+All files are written to:
 ```
 family-agents/projects/<project-name>/
 ```

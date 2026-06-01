@@ -3,61 +3,55 @@
 Lessons captured automatically from failures, corrections, and retrospectives.
 
 ### [2026-05-23 22:30] via user-correction
-This is a WINDOWS machine. NEVER use Unix-only commands: bash, bash -c, tail, head, cat, grep, ls, wc, sed, awk, which, chmod, chown. Use Windows equivalents: cmd /c, Get-Content -Tail, Get-Content -TotalCount, type, findstr, dir, Measure-Object, PowerShell, where.exe, icacls. For checking if files exist, use `dir` or `if exist`, NOT `ls`. Use Glob tool for file pattern matching to avoid "command not recognized" errors.
+This is a WINDOWS machine. NEVER use Unix-only commands: bash, bash -c, tail, head, cat, grep, ls, wc, sed, awk, which, chmod, chown. Use Windows equivalents: cmd /c, Get-Content, type, findstr, dir, Measure-Object, where.exe, icacls. Use Glob tool for file pattern matching. Keep projects out of OneDrive and protected directories (use `C:\Users\username\code\` instead)—both cause PermissionError and file locking. On Windows, never skip subprocess cleanup in timeout tests—explicitly close or context-manage all asyncio transports to prevent unraisable exceptions. Always verify `uv` is installed and in PATH before running `uv run` commands; check with `uv --version` or `where uv` first.
 
 ### [2026-05-23 20:07] via lesson
 Before running or writing tests, verify the source implementation: exception types must match test assertions, method signatures must exist, imported classes must be defined in their source modules, and imported exception classes must exist. Read the actual code first—do not assume test assumptions are correct. This catches mismatches between test expectations and real implementation before wasting time debugging.
 
-### [2026-05-23 05:21] via lesson
-Before running `git add path1 path2...`, verify all paths exist in the working tree using `git status` or Glob tool—non-existent files cause git add to fail silently or with exit(1).
-
 ### [2026-05-23 05:37] via lesson
-Before running `git commit`, always stage changes first with `git add` or use `git commit -a` to stage and commit in one command. Untracked or unstaged changes won't be included without explicit staging.
-
-### [2026-05-22 11:10] via lesson
-Before running Playwright-dependent tests, run `playwright install` to ensure browser binaries are available—missing browsers cause runner initialization failures instead of obvious setup errors.
-
-### [2026-05-21 18:27] via bash-failure
-Always verify `uv` is installed and in PATH before running `uv run` commands on Windows—check with `uv --version` or `where uv` first.
+Before running `git add` or `git commit`: verify file paths exist with `git status` or Glob tool, check if paths match `.gitignore` patterns (use `git add -f` if ignored but should be committed), and always stage changes with `git add` or `git commit -a` before committing—untracked or unstaged changes won't be included without explicit staging.
 
 ### [2026-05-23 14:26] via lesson
-Always run `npm install` before executing test commands like `vitest run` to ensure testing dependencies (e.g., `@testing-library/react`) are installed in node_modules.
-
-### [2026-05-22 11:03] via lesson
-On Windows, never skip subprocess cleanup in timeout tests—explicitly close or context-manage all asyncio transports to prevent unraisable exceptions from masking actual test failures.
+Always run `npm install` before executing test commands like `pytest` or `vitest` to ensure all testing dependencies are installed in node_modules. Also run `playwright install` before Playwright-dependent tests to ensure browser binaries are available—missing browsers cause runner initialization failures instead of obvious setup errors.
 
 ### [2026-05-23 20:14] via lesson
-Always run pytest with `--tb=long` instead of `--tb=short` when you see ERROR entries—the short format truncates AttributeError and traceback details needed to identify the root cause of setup or import failures.
-
-### [2026-05-23 20:17] via lesson
-On Windows, keep projects out of problematic paths: never run pytest from OneDrive or protected directories (use `C:\Users\username\code\` instead to avoid PermissionError and file locking), and avoid paths with spaces when using Vitest (e.g., 'OneDrive - Adobe')—both cause cryptic failures during test execution or transform phases.
+Always run pytest with `--tb=long` instead of `--tb=short` when you see ERROR entries—the short format truncates AttributeError and traceback details needed to identify root causes. When facing truncated errors across multiple tests, run a single test file with `uv run pytest tests/test_file.py -x --tb=short` to isolate the issue and see full output.
 
 ### [2026-05-23 14:54] via lesson
-Before running Vitest integration tests, verify fetch mocks are configured for all API endpoints—missing mocks cause unexpected failures ("Failed to load documents") instead of obvious setup errors.
-
-### [2026-05-23 13:23] via lesson
-Before running the full test suite with API response types, verify the OpenAPI contract implementation is complete—check that RunnerType enum and runner field are defined on all required response types (TriggerRunResponse, RunStatusResponse, RunSummary).
-
-### [2026-05-22 11:18] via lesson
-Verify RunnerFactory tests pass before running dependent tests—factory test failures (test_factory_raises_on_unknown_runner_type, test_factory_is_configurable_via_settings) cascade into RunnerNotInitializedError downstream.
-
-### [2026-05-23 20:23] via lesson
-Always run `uv run pytest tests/test_runner_factory.py -x --tb=short` on a single test file when facing truncated AttributeError messages across multiple tests. Full-suite runs cascade the initial failure and truncate error output, hiding the root cause.
-
-### [2026-05-24 01:38] via lesson
-Always add `--timeout=60000` when running `vitest run` to fail fast on hanging tests instead of waiting for the 120s default timeout. This prevents blocking test runs and surfaces slow/frozen tests immediately.
-
-### [2026-05-24 12:54] via lesson
-Never pass unsupported flags to Vitest—always verify flag names using `vitest run --help` before executing test commands. The `--timeout` flag caused a CACError because it's not a valid Vitest CLI option.
-
-### [2026-05-24 13:23] via lesson
-Always specify a higher test timeout for vitest (e.g., `vitest run --reporter=verbose --test-timeout=300000`) since PdfViewer.test.jsx hangs past the default 120s limit.
-
-### [2026-05-24 14:00] via lesson
-Never use `--reporter=verbose` for a FULL vitest suite run — it suppresses the `❯ filename (0 test)` progress bar that reveals stuck files. A silently hung file produces zero verbose output; the suite times out with no diagnostic signal. Use the DEFAULT reporter (no flag) for full suite runs. Use `--reporter=verbose` ONLY for single-file runs: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+Before running Vitest integration tests or full test suites with API response types, verify fetch mocks are configured for all endpoints and the OpenAPI contract implementation is complete (check that RunnerType enum and runner field are defined on all required response types). Verify RunnerFactory tests pass first (`uv run pytest tests/test_runner_factory.py -x --tb=short`)—factory failures cascade into downstream tests.
 
 ### [2026-05-24 15:00] via user-correction
-NEVER use `--reporter=dot` OR `--reporter=verbose` for a full `npx vitest run` suite — both suppress the `❯ filename (0 test)` progress indicator that timeout diagnosis relies on to name the stuck file. Without it, a module-load hang produces no diagnostic output: the timeout fires, the generic 'slow build' fallback triggers, and the agent loops forever retrying the same failing command. ALWAYS use the DEFAULT reporter (no `--reporter` flag): `npx vitest run`. Reserve non-default reporters for SINGLE-FILE runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`.
+For `npx vitest run`: NEVER use `--reporter=dot` or `--reporter=verbose` for full suite runs—both suppress the `❯ filename (0 test)` progress indicator needed to diagnose hangs. Use the DEFAULT reporter (no flag): `npx vitest run`. Reserve non-default reporters for single-file runs only: `npx vitest run SomeFile.test.jsx --reporter=verbose`. Always use `--test-timeout=300000` for longer-running tests. When all tests show ✓ but the process hangs with no 'Test Files N passed' summary, the hang is in vitest v2's pool.close()—add a globalSetup watchdog. Create `vitest.globalSetup.js`: `const WATCHDOG_MS = 8000; export default function setup() { const t = setTimeout(() => { process.exit(0); }, WATCHDOG_MS); t.unref(); }` and add `globalSetup: './vitest.globalSetup.js'` to vite.config.js test block.
 
-### [2026-05-24 15:30] via user-correction (updated 2026-05-24)
-When all vitest test files show ✓ but the process hangs with no 'Test Files N passed' summary, the hang is in vitest v2's pool.close() — it waits for worker IPC channels that never close because workers have pending handles (React 18 scheduler timers, canvas callbacks). ALL pool types are affected (forks, vmForks, threads). forceExit: true does NOT help — it fires AFTER pool.close() returns, which never happens. Every individual file exits fine alone (single-file runs exit cleanly with exit code 0). CORRECT FIX: add a globalSetup watchdog. Create vitest.globalSetup.js: `const WATCHDOG_MS = 8000; export default function setup() { const t = setTimeout(() => { process.exit(0); }, WATCHDOG_MS); t.unref(); }` Then add `globalSetup: './vitest.globalSetup.js'` to the test block in vite.config.js. The t.unref() means the timer does NOT block a clean exit — it only fires if pool.close() is stuck. Tests complete in <2s, watchdog fires at 8s, exit code 0 confirms all passed. NEVER increase the bash timeout — the process will NEVER exit on its own without the watchdog.
+### [2026-05-24 18:14] via lesson
+Before running `pytest tests/test_file.py::ClassName`, verify the file exists using Glob tool and the class exists in that file—omit the `::ClassName` selector to list available tests first if uncertain. Always confirm file paths after `cd` commands instead of assuming directory structure.
+
+### [2026-05-24 15:46] via lesson
+Never include markdown code block delimiters (triple backticks) in shell commands—they'll be interpreted as literal command names and fail on execution. Strip markdown formatting syntax before pasting any command.
+
+### [2026-06-01 08:50] via lesson
+Before running pytest after `cd backend`, verify the relative path is correct from the backend directory. Instead, run pytest from the project root without changing directories.
+
+### [2026-06-01 09:02] via lesson
+Always verify the test file path exists before running pytest, especially after directory changes with `cd` — use `test -f tests/test_us0306_metadata.py` to confirm the relative path is valid from the new working directory.
+
+### [2026-06-01 09:09] via lesson
+Always verify the test file exists at the specified path relative to your current working directory before running pytest, especially after using `cd` — run `ls tests/test_us0306_metadata.py` first or use an absolute path from the project root.
+
+### [2026-06-01 09:19] via lesson
+Always verify SQLAlchemy model parameter names against the class definition before running tests — Document doesn't accept 'file_size' as a kwarg, causing cascading test failures.
+
+### [2026-06-01 09:28] via lesson
+Always check that model schema definitions match all fields referenced in instantiation before running tests—the Document class is missing 'file_size'. Before testing parameter validation, verify FastAPI endpoints use Path validators to return 422 for invalid types instead of 404.
+
+### [2026-06-01 09:34] via lesson
+Always add `--tb=short` to your pytest command when investigating failures; `-v` alone shows test names but not the assertion errors needed to debug. Next time, run: `pytest tests/test_us0306_metadata.py -v --tb=short` to capture full error tracebacks.
+
+### [2026-06-01 09:43] via lesson
+Always run `pytest -vv` instead of plain `pytest` to capture full failure details and assertion messages—the test summary alone doesn't show why tests are actually failing.
+
+### [2026-06-01 09:50] via lesson
+Always verify the backend endpoint is implemented and the route configuration matches the test's expected path before running integration tests—a 404 response indicates a missing or misconfigured endpoint, not a test logic issue.
+
+### [2026-06-01 10:04] via lesson
+Before running endpoint integration tests, verify the route is registered and accessible by checking the router configuration or making a manual test request to the endpoint. The 404 errors indicate the `/documents/{id}` endpoint isn't implemented yet, so tests will fail until the handler exists.

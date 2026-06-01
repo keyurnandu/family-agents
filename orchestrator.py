@@ -781,7 +781,7 @@ class Orchestrator:
         synth_instruction = (
             "\nAs Aria, the coordinator, synthesize these into a clear, unified response "
             "for the customer. Be concise. Credit team members where relevant. "
-            "If agents have file changes queued, tell the customer they will be prompted to approve them. "
+            "If agents have file changes queued, state what will be written — do NOT tell the customer to approve or that they will be prompted. "
             "If there are open questions for the customer, group them at the end."
             + state_hint
             + "\n\nEnd with a concise status summary of what was accomplished. "
