@@ -483,11 +483,9 @@ def _auto_clean_markdown_artifacts(path: Path, content: str) -> tuple[str, bool]
 
     Returns ``(cleaned_content, was_cleaned)``.  Only processes file
     extensions in ``_CODE_EXTENSIONS``.  Removes:
-    - Leading/trailing triple-backtick fence lines (```python, ```, etc.)
+    - ALL triple-backtick fence lines anywhere in the file (```python,
+      ```, etc.) — these have no valid meaning in code files
     - Trailing prose instruction lines that match ``_MARKDOWN_ARTIFACT_PATTERNS``
-
-    If the cleaned content still has artifacts after stripping (e.g. fences
-    in the middle of the file), falls through to the reject path.
     """
     if path.suffix.lower() not in _CODE_EXTENSIONS:
         return content, False
@@ -495,15 +493,16 @@ def _auto_clean_markdown_artifacts(path: Path, content: str) -> tuple[str, bool]
     lines = content.splitlines()
     changed = False
 
-    # Strip leading fence
-    while lines and re.match(r"^```\w*\s*$", lines[0]):
-        lines.pop(0)
-        changed = True
-
-    # Strip trailing fence
-    while lines and re.match(r"^```\s*$", lines[-1]):
-        lines.pop()
-        changed = True
+    # Strip ALL fence lines — ```python, ```jsx, ```, etc.
+    # These never appear in valid JS/JSX/TS/PY code files.
+    fence_re = re.compile(r"^```\w*\s*$")
+    cleaned_lines = []
+    for line in lines:
+        if fence_re.match(line):
+            changed = True
+        else:
+            cleaned_lines.append(line)
+    lines = cleaned_lines
 
     # Strip trailing prose lines (agents append "Now run the full test suite:" etc.)
     prose_pattern = _MARKDOWN_ARTIFACT_PATTERNS[1][0]  # the prose regex
