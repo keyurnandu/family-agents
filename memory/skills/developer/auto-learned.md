@@ -70,3 +70,6 @@ Always verify the API endpoint is registered in the router and the URL path matc
 
 ### [2026-06-01 10:08] via lesson
 Always run pytest with `-vv --tb=short` instead of just `-v`; the latter shows test names only, while you need full traceback output to see actual assertion failures and fix the root cause.
+
+### [2026-06-01 10:10] via lesson
+Before running `pytest tests/test_us0306_metadata.py` from backend/, verify that app/services/__init__.py exists, or explicitly set PYTHONPATH=.. to resolve module imports from the parent app package.

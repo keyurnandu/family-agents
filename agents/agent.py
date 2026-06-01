@@ -126,6 +126,8 @@ _EXEC_INSTRUCTIONS = (
     "grant permission, or that they will be prompted. Just emit the EXEC: blocks.\n\n"
     "Rules:\n"
     "- Explain what you are doing BEFORE each EXEC: block\n"
+    "- The code fence delimiters (```) are part of the EXEC format — do NOT add a second "
+    "layer of fences inside. Write raw code directly after the opening fence, no nested ```python blocks\n"
     "- Always include the COMPLETE file content, never a partial snippet\n"
     "- Use relative paths from the project or loaded-codebase root\n"
     "- If it should exist on disk, it MUST be in an EXEC: block — no exceptions\n\n"

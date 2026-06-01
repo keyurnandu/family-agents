@@ -585,6 +585,22 @@ class Action:
     agent_name: str
 
 
+def _strip_nested_fences(content: str) -> str:
+    """Remove accidental nested markdown fences from extracted file content.
+
+    Agents sometimes wrap file content in an extra ```python / ``` layer
+    inside the EXEC:file block. The outer fences are already stripped by
+    the regex, but the inner ones slip through and trigger the markdown
+    artifact guard. Strip them so clean code reaches the guard.
+    """
+    lines = content.splitlines()
+    if lines and re.match(r"^```\w*\s*$", lines[0]):
+        lines = lines[1:]
+    if lines and re.match(r"^```\s*$", lines[-1]):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
 def parse_actions(response_text: str, agent_name: str) -> list[Action]:
     """Extract EXEC: tagged blocks from an agent response."""
     actions: list[Action] = []
@@ -607,6 +623,7 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         if file_match:
             path = file_match.group(1).strip().strip("*`'\"")
             content = file_match.group(2).strip()
+            content = _strip_nested_fences(content)
             if content:
                 actions.append(Action(kind="file", label=path, content=content, agent_name=agent_name))
             continue
