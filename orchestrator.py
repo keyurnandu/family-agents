@@ -2266,8 +2266,10 @@ class Orchestrator:
             return
 
         # Short-circuit: direct file reads served instantly from disk (zero LLM calls).
-        # _try_serve_file_directly also writes to db/messages, so return immediately.
-        if self._try_serve_file_directly(user_input):
+        # Skip during auto-pilot — those messages are agent instructions, not user
+        # file-read requests. Words like "GET" and filenames in the task description
+        # would false-positive match the file-read intent regex.
+        if not getattr(self, "_auto_pilot_active", False) and self._try_serve_file_directly(user_input):
             return
 
         self.db.save_message(self.project_name, "user", user_input)
