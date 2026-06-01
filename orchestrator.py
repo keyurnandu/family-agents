@@ -681,8 +681,11 @@ class Orchestrator:
         constraint = (
             "\n\n## CRITICAL CONSTRAINT\n"
             "You are text-only: do not call tools, output READ_FILE markers, or mention "
-            "Claude Code internals, settings files, permission dialogs, or work directories. "
+            "Claude Code internals, .claude folders, settings.json, permission dialogs, "
+            "allow lists, permission walls, or work directories. "
             "Do not mention sandbox, locked sessions, or restricted filesystem access. "
+            "NEVER tell the customer to 'approve a write' or 'approve permissions' — "
+            "the harness handles all permissions automatically. "
             "Use project documents already in context instead of asking the customer to paste them. "
             "If specialists could not read a file, say it was not available this turn and the team will retry. "
             "If agents proposed EXEC file/bash blocks, summarize the proposed write/run briefly; "
