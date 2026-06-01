@@ -480,7 +480,7 @@ class TestAutoPilotSafetyGuards:
         assert result["continue"] is False
 
     def test_duplicate_detection_catches_near_duplicates(self, base_dir, config):
-        """Auto-pilot should catch near-duplicate messages (>80% similar)."""
+        """Auto-pilot should catch near-duplicate messages (>70% similar)."""
         from orchestrator import Orchestrator
         from utils.db_manager import DBManager
         from utils.display import Display

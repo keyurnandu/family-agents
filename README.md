@@ -348,7 +348,7 @@ Auto-pilot has four built-in guards that prevent getting stuck:
 |---|---|
 | **User-input-needed** | If the team's response asks you a question ("could you confirm", "please provide", etc.), auto-pilot stops immediately — the team is blocked on your input |
 | **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
-| **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >80% similar to any previous one, stops — it's a loop |
+| **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >70% similar to any previous one, stops — it's a loop |
 | **Checkpoint cap** | Normal mode: pauses every 5 iterations for manual "continue". `/auto` mode: auto-resets at each checkpoint, hard ceiling at 50 iterations |
 | **Resume on incomplete** | When auto-pilot stops prematurely (cap, failure, or duplicate loop), it saves context and prompts you to type `continue` to resume where it left off |
 

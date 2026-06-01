@@ -1706,7 +1706,7 @@ class Orchestrator:
         3. Failure exit: if final_response contains BASH FAILED or
            HEALTH_CHECK: FAILED → stop UNLESS RETRY OUTCOMES shows the
            agent already self-healed (all retry entries are OK/PASSED)
-        4. Duplicate detection: if Haiku's next_message is >80% similar to
+        4. Duplicate detection: if Haiku's next_message is >70% similar to
            any previous_messages entry → stop (it's a loop)
         """
         _STOP = {"continue": False, "next_message": ""}
@@ -1821,7 +1821,7 @@ class Orchestrator:
             next_msg = result.get("next_message", "").strip()
             if next_msg:
                 for prev in previous_messages:
-                    if self._message_similarity(next_msg, prev) > 0.80:
+                    if self._message_similarity(next_msg, prev) > 0.70:
                         console.print(
                             "[yellow]  ⚠ Auto-pilot stopping — "
                             "repeated task detected (loop)[/yellow]"
