@@ -301,6 +301,10 @@ The token bar turns yellow at 50% and red at 80% — a signal to consider `/clea
 
 Blocking commands are caught before the approval prompt and returned to the agent with the correct non-interactive alternative (`vitest run`, `set CI=true && npm test`, `vite build`, etc.) so it can self-correct without human intervention.
 
+### File write safety
+
+When an agent wraps code in an extra markdown fence (e.g. ` ```jsx ` inside the `EXEC:file` block), the system automatically strips it before writing. If a file still contains markdown artifacts (triple backticks or prose instructions), the write is **rejected before it hits disk** — the agent sees `FILE REJECTED — NOT WRITTEN TO DISK` and is immediately retried with the lesson in context. This prevents the class of silent corruption where markdown wrappers cause parse failures in the runtime.
+
 ### Always-on auto-pilot
 
 Aria automatically decides the next logical step after every turn that produces actionable work (multi-phase routing or file writes/bash execution). No toggle needed — this is always active.
