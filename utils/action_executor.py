@@ -638,6 +638,19 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         )
         if bash_match:
             content = bash_match.group(1).strip()
+            content = _strip_nested_fences(content)
+            # Strip trailing prose that leaked in via greedy regex —
+            # stop at the first line that looks like prose (starts with
+            # a capital letter followed by lowercase, no shell metachar)
+            clean_lines = []
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped and re.match(r"^[A-Z][a-z]", stripped) and not any(
+                    c in stripped for c in ("&&", "||", "|", ">", "<", "$", "=", "/", "\\", "-")
+                ):
+                    break  # prose line — stop here
+                clean_lines.append(line)
+            content = "\n".join(clean_lines).strip()
             if content:
                 lines = content.splitlines()
                 label = (lines[0] if lines else "shell command")[:80]
