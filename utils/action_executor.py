@@ -478,6 +478,47 @@ def _has_markdown_artifacts(path: Path, content: str) -> str | None:
     return None
 
 
+def _auto_clean_markdown_artifacts(path: Path, content: str) -> tuple[str, bool]:
+    """Strip markdown artifacts from code file content instead of rejecting.
+
+    Returns ``(cleaned_content, was_cleaned)``.  Only processes file
+    extensions in ``_CODE_EXTENSIONS``.  Removes:
+    - Leading/trailing triple-backtick fence lines (```python, ```, etc.)
+    - Trailing prose instruction lines that match ``_MARKDOWN_ARTIFACT_PATTERNS``
+
+    If the cleaned content still has artifacts after stripping (e.g. fences
+    in the middle of the file), falls through to the reject path.
+    """
+    if path.suffix.lower() not in _CODE_EXTENSIONS:
+        return content, False
+
+    lines = content.splitlines()
+    changed = False
+
+    # Strip leading fence
+    while lines and re.match(r"^```\w*\s*$", lines[0]):
+        lines.pop(0)
+        changed = True
+
+    # Strip trailing fence
+    while lines and re.match(r"^```\s*$", lines[-1]):
+        lines.pop()
+        changed = True
+
+    # Strip trailing prose lines (agents append "Now run the full test suite:" etc.)
+    prose_pattern = _MARKDOWN_ARTIFACT_PATTERNS[1][0]  # the prose regex
+    while lines and prose_pattern.match(lines[-1].strip()):
+        lines.pop()
+        changed = True
+
+    # Strip trailing blank lines left behind
+    while lines and not lines[-1].strip():
+        lines.pop()
+
+    cleaned = "\n".join(lines)
+    return cleaned, changed
+
+
 # ── Destructive command detection ──────────────────────────────────────
 # Commands that can cause irreversible data loss. In /auto mode, these
 # are the ONLY bash commands that still require manual confirmation.
@@ -776,6 +817,14 @@ def prompt_and_execute(
                 )
                 outcomes.append(f"FILE BLOCKED: {a.label} — escapes project directory")
                 continue
+            # Auto-clean markdown artifacts before checking — strip
+            # trailing prose and fences that agents accidentally include.
+            a.content, was_cleaned = _auto_clean_markdown_artifacts(Path(a.label), a.content)
+            if was_cleaned:
+                console.print(
+                    f"  [yellow]⚠ AUTO-CLEANED[/yellow]  [cyan]{a.label}[/cyan]  "
+                    "[dim](stripped trailing markdown/prose artifacts)[/dim]"
+                )
             md_warning = _has_markdown_artifacts(Path(a.label), a.content)
             if md_warning:
                 console.print(
