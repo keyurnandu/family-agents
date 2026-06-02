@@ -84,6 +84,53 @@ _BLOCKING_SAFE_REPLACEMENTS = {
 }
 
 
+def _auto_fix_blocking_command(cmd: str) -> str | None:
+    """Try to convert a blocking command into its safe non-interactive equivalent.
+
+    Returns the fixed command string, or None if no safe replacement is known.
+    Handles compound commands (e.g. "cd frontend && npm test") by fixing
+    the blocking part while preserving the prefix (cd, env vars, etc.).
+    """
+    # Split on && to preserve cd/env prefix
+    parts = [p.strip() for p in cmd.split("&&")]
+    prefix_parts = []
+    blocking_part = None
+
+    for part in parts:
+        if is_blocking_bash(part):
+            blocking_part = part
+            break
+        prefix_parts.append(part)
+
+    if not blocking_part:
+        return None
+
+    # Try each replacement pattern
+    fixed = None
+    lower = blocking_part.lower().strip()
+
+    # npm test / npm run test → set CI=true && npm test -- --verbose
+    if re.search(r"\bnpm\s+(?:run\s+)?tests?\b", lower):
+        fixed = "set CI=true && npm test -- --verbose"
+    # vitest (without run) → node_modules\.bin\vitest run --reporter=verbose
+    elif re.search(r"\bvitest\b(?!\s+run)", lower):
+        fixed = r"node_modules\.bin\vitest run --reporter=verbose"
+    # jest → set CI=true && npx jest --verbose
+    elif re.search(r"\bjest\b", lower):
+        fixed = "set CI=true && npx jest --watchAll=false --verbose"
+    # vite (without build) → node_modules\.bin\vite build
+    elif re.search(r"\bvite\b(?!\s+build)", lower):
+        fixed = r"node_modules\.bin\vite build"
+
+    if not fixed:
+        return None
+
+    # Reassemble with prefix
+    if prefix_parts:
+        return " && ".join(prefix_parts) + " && " + fixed
+    return fixed
+
+
 def is_blocking_bash(cmd: str) -> bool:
     """Return True if the command starts an interactive/watch process that never exits.
 
@@ -1017,28 +1064,40 @@ def prompt_and_execute(
             )
             continue
 
-        # Block commands that start interactive/watch processes and never exit
+        # Auto-correct commands that start interactive/watch processes.
+        # Instead of blocking and hoping the agent retries correctly,
+        # replace the command with the safe alternative and run it.
         if is_blocking_bash(action.content):
-            console.print(
-                "[bold red]  ✗ BLOCKED — this command starts an interactive process "
-                "that never exits[/bold red]"
-            )
-            console.print(
-                "[dim]  Use a non-interactive alternative:\n"
-                "  • Jest:    set CI=true && npm test -- --verbose\n"
-                r"  • Vitest:  node_modules\.bin\vitest run --reporter=verbose"
-                "\n"
-                r"  • Vite:    node_modules\.bin\vite build"
-                "\n"
-                "  • uvicorn: import the app in Python and check it starts\n"
-                "  • Flask:   python -c \"from app import create_app; create_app()\"[/dim]"
-            )
-            outcomes.append(
-                f"BASH BLOCKED: {action.label} — starts an interactive/watch process that never exits. "
-                "Use CI=true npm test, vitest run, or vite build instead."
-                + _ANTI_HALLUCINATION_FOOTER
-            )
-            continue
+            fixed_cmd = _auto_fix_blocking_command(action.content)
+            if fixed_cmd:
+                console.print(
+                    f"[yellow]  ⚠ AUTO-FIXED[/yellow]  [dim]interactive command → "
+                    f"non-interactive alternative[/dim]"
+                )
+                console.print(f"  [dim]Original:  {action.content.strip()[:100]}[/dim]")
+                console.print(f"  [dim]Fixed:     {fixed_cmd.strip()[:100]}[/dim]")
+                action.content = fixed_cmd
+            else:
+                console.print(
+                    "[bold red]  ✗ BLOCKED — this command starts an interactive process "
+                    "that never exits[/bold red]"
+                )
+                console.print(
+                    "[dim]  Use a non-interactive alternative:\n"
+                    "  • Jest:    set CI=true && npm test -- --verbose\n"
+                    r"  • Vitest:  node_modules\.bin\vitest run --reporter=verbose"
+                    "\n"
+                    r"  • Vite:    node_modules\.bin\vite build"
+                    "\n"
+                    "  • uvicorn: import the app in Python and check it starts\n"
+                    "  • Flask:   python -c \"from app import create_app; create_app()\"[/dim]"
+                )
+                outcomes.append(
+                    f"BASH BLOCKED: {action.label} — starts an interactive/watch process that never exits. "
+                    "Use CI=true npm test, vitest run, or vite build instead."
+                    + _ANTI_HALLUCINATION_FOOTER
+                )
+                continue
 
         if auto_mode and not is_destructive_bash(action.content):
             # Auto-approve safe bash commands
