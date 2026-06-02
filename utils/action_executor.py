@@ -504,11 +504,17 @@ def _auto_clean_markdown_artifacts(path: Path, content: str) -> tuple[str, bool]
             cleaned_lines.append(line)
     lines = cleaned_lines
 
-    # Strip trailing prose lines (agents append "Now run the full test suite:" etc.)
+    # Strip ALL prose instruction lines anywhere in the file —
+    # agents write "Now run the full test suite:" or "Here is the
+    # implementation:" into __init__.py and other small files.
     prose_pattern = _MARKDOWN_ARTIFACT_PATTERNS[1][0]  # the prose regex
-    while lines and prose_pattern.match(lines[-1].strip()):
-        lines.pop()
-        changed = True
+    code_lines = []
+    for line in lines:
+        if prose_pattern.match(line.strip()):
+            changed = True
+        else:
+            code_lines.append(line)
+    lines = code_lines
 
     # Strip trailing blank lines left behind
     while lines and not lines[-1].strip():
