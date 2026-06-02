@@ -360,11 +360,26 @@ Auto-pilot has four built-in guards that prevent getting stuck:
 
 | Guard | What it does |
 |---|---|
-| **User-input-needed** | If the team's response asks you a question ("could you confirm", "please provide", etc.), auto-pilot stops immediately — the team is blocked on your input |
-| **Failure exit** | If the last iteration had `BASH FAILED` or `HEALTH_CHECK: FAILED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
+| **User-input-needed** | If the team's response asks you a question ("could you confirm", "please provide", "please approve", etc.), auto-pilot stops immediately — the team is blocked on your input |
+| **Failure exit** | If the last iteration had `BASH FAILED`, `HEALTH_CHECK: FAILED`, or `FILE REJECTED`, auto-pilot stops — unless the response also shows progress (`FILE WRITTEN`, `BASH OK`, or `HEALTH_CHECK: PASSED`), meaning the agent is actively fixing things |
 | **Duplicate detection** | Tracks all previous auto-pilot messages. If the next step is >70% similar to any previous one, stops — it's a loop |
 | **Checkpoint cap** | Normal mode: pauses every 5 iterations for manual "continue". `/auto` mode: auto-resets at each checkpoint, hard ceiling at 50 iterations |
 | **Resume on incomplete** | When auto-pilot stops prematurely (cap, failure, or duplicate loop), it saves context and prompts you to type `continue` to resume where it left off |
+| **Bash dedup** | If two agents in the same phase emit the same command, the second gets the cached result instead of re-running — saves time and avoids duplicate output |
+
+### Anti-hallucination
+
+Agents running via `claude --print` inherit Claude's training data, which includes knowledge about `.claude/settings.json`, permissions, and other infrastructure that doesn't apply in family-agents. When agents see failure outcomes (`FILE REJECTED`, `BASH BLOCKED`), they sometimes hallucinate infrastructure explanations instead of fixing the actual problem.
+
+Three layers prevent this:
+
+| Layer | Where | What it blocks |
+|---|---|---|
+| **Failure outcome footer** | Appended to every `FILE REJECTED`, `FILE BLOCKED`, `BASH BLOCKED` outcome | "Don't mention .claude, settings.json, permissions — fix the issue using EXEC: blocks" |
+| **Synthesis constraint** | Aria's system prompt | Bans "can't verify remotely", "paste the output", "run this in your terminal", "working directory is wrong" |
+| **Agent constraint** | Every agent's system prompt | Same bans + reminder that EXEC:bash works — never ask the customer to run commands manually |
+
+The footer is the most effective because agents read it at the exact moment they're most likely to hallucinate — right next to the error message.
 
 ---
 
