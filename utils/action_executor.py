@@ -977,7 +977,20 @@ def prompt_and_execute(
                 outcomes.append(f"FILE SKIPPED: {a.label}")
 
     # ── Bash commands — individual prompts ───────────────────────────
+    # Deduplicate: if two agents emit the same command, run it once and
+    # share the outcome. Agents within a phase run in parallel and often
+    # independently decide to run the same test/build command.
+    _bash_seen: dict[str, str] = {}  # normalized command → outcome string
     for action in bash_actions:
+        cmd_key = action.content.strip().lower()
+        if cmd_key in _bash_seen:
+            console.print(
+                f"\n[dim]{action.agent_name} also requested: {action.label} "
+                f"— already ran (dedup)[/dim]"
+            )
+            outcomes.append(_bash_seen[cmd_key])
+            continue
+
         console.print()
         console.print(f"[bold yellow]{action.agent_name}[/bold yellow] wants to run:")
         _show_bash_action(action)
@@ -1070,18 +1083,20 @@ def prompt_and_execute(
                 console.print("  [green]✓ Done[/green]  (exit 0)\n")
                 # Cap output fed back to agents at 3000 chars to avoid token explosion
                 snippet = output[-3000:] if len(output) > 3000 else output
-                outcomes.append(
+                _outcome = (
                     f"BASH OK: {action.label}\nOUTPUT:\n{snippet}" if snippet
                     else f"BASH OK: {action.label}"
                 )
             else:
                 console.print(f"  [red]✗ Exited {returncode}[/red]\n")
                 snippet = output[-3000:] if len(output) > 3000 else output
-                outcomes.append(
+                _outcome = (
                     f"BASH FAILED (exit {returncode}): {action.label}\nOUTPUT:\n{snippet}"
                     if snippet
                     else f"BASH FAILED (exit {returncode}): {action.label}"
                 )
+            outcomes.append(_outcome)
+            _bash_seen[cmd_key] = _outcome  # cache for dedup
         else:
             console.print("  [dim]Skipped.[/dim]")
             outcomes.append(f"BASH SKIPPED: {action.label}")
