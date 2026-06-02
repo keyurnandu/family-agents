@@ -301,9 +301,19 @@ The token bar turns yellow at 50% and red at 80% — a signal to consider `/clea
 
 Blocking commands are caught before the approval prompt and returned to the agent with the correct non-interactive alternative (`vitest run`, `set CI=true && npm test`, `vite build`, etc.) so it can self-correct without human intervention.
 
-### File write safety
+### File write safety — auto-cleaning
 
-When an agent wraps code in an extra markdown fence (e.g. ` ```jsx ` inside the `EXEC:file` block), the system automatically strips it before writing. If a file still contains markdown artifacts (triple backticks or prose instructions), the write is **rejected before it hits disk** — the agent sees `FILE REJECTED — NOT WRITTEN TO DISK` and is immediately retried with the lesson in context. This prevents the class of silent corruption where markdown wrappers cause parse failures in the runtime.
+Agents frequently contaminate code files with markdown artifacts — triple-backtick fences (` ``` `, ` ```jsx `, ` ```python `), prose instructions ("Now run the full test suite:", "Here is the implementation:"), and bold-formatted prose ("**Step 2 — Clear the lock:**"). These cause silent syntax errors, especially in `__init__.py` files where the entire content becomes invalid.
+
+The system auto-cleans these artifacts **before writing to disk**:
+
+| Artifact | Example | Action |
+|---|---|---|
+| Triple-backtick fences | ` ```jsx `, ` ``` ` | Stripped from any position in the file |
+| Prose instruction lines | `Now run...`, `Here is...`, `Make sure...` | Stripped from any position |
+| Bold prose patterns | `**Step 2...`, `**Note:...`, `**Next...` | Stripped from any position |
+
+If artifacts survive cleaning (shouldn't happen), the write is **rejected** — the agent sees `FILE REJECTED — NOT WRITTEN TO DISK` and is immediately retried. A yellow `⚠ AUTO-CLEANED` note appears when stripping occurs so you know it happened.
 
 ### Always-on auto-pilot
 
