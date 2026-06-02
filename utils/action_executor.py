@@ -454,7 +454,8 @@ _MARKDOWN_ARTIFACT_PATTERNS: list[tuple[re.Pattern, str]] = [
         re.compile(
             r"^(?:Now run|Here is|Run the following|The above|You can now|"
             r"This (?:file|component|code|implementation)|Note that|"
-            r"Make sure|Don't forget|Next(?:,| step))\b",
+            r"Make sure|Don't forget|Next(?:,| step)|"
+            r"\*\*(?:Step|Note|Next|Now|Run|Here|The |This |Make))\b",
             re.MULTILINE,
         ),
         "prose instruction line — agent wrote markdown explanation into code file",
