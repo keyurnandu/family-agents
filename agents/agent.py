@@ -251,6 +251,8 @@ class Agent:
             "Do NOT mention Claude Code, settings.json, .claude folders, permission dialogs, "
             "allow lists, or permission walls — none of that applies here. "
             "NEVER tell the customer to 'approve a write' or 'approve permissions'. "
+            "NEVER say 'paste the output', 'run this in your terminal', or 'can't verify remotely' — "
+            "you CAN run commands via EXEC:bash. If a command failed, fix and retry via EXEC:bash. "
             "The ONLY way to deliver files or run commands is via EXEC: tagged blocks in your text.\n\n"
             "BREVITY RULE: Never reproduce or reprint document content that is already in your context. "
             "When asked about a document, sprint, epics, or stories — respond with a SHORT summary "

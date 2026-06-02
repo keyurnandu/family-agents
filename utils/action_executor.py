@@ -45,6 +45,15 @@ from rich.text import Text
 
 console = Console()
 
+# ── Anti-hallucination footer ─────────────────────────────────────────
+# Appended to every failure outcome so agents see it right next to
+# the error. Prevents agents from inventing infrastructure blockers
+# (".claude/settings.json", "permission wall", "paste the output").
+_ANTI_HALLUCINATION_FOOTER = (
+    " DO NOT mention .claude, settings.json, permissions, allow lists, "
+    "or ask the customer to run commands manually — fix the issue using EXEC: blocks."
+)
+
 # ── Blocking command detection ─────────────────────────────────────────
 # Commands that start interactive / watch-mode processes and never exit.
 # These are ALWAYS blocked — there is no scenario where running them in
@@ -821,7 +830,7 @@ def prompt_and_execute(
                     f"  [red]✗ BLOCKED[/red]  [cyan]{a.label}[/cyan]  "
                     "[dim](path escapes project directory)[/dim]"
                 )
-                outcomes.append(f"FILE BLOCKED: {a.label} — escapes project directory")
+                outcomes.append(f"FILE BLOCKED: {a.label} — escapes project directory." + _ANTI_HALLUCINATION_FOOTER)
                 continue
             # Auto-clean markdown artifacts before checking — strip
             # trailing prose and fences that agents accidentally include.
@@ -844,6 +853,7 @@ def prompt_and_execute(
                     "Do NOT wrap the code in ```python or ```jsx fences — the EXEC: "
                     "block already provides the delimiters. Write raw code only, "
                     "no markdown fences, no prose instructions."
+                    + _ANTI_HALLUCINATION_FOOTER
                 )
                 continue
             safe_file_actions.append(a)
@@ -1002,7 +1012,8 @@ def prompt_and_execute(
             )
             outcomes.append(
                 f"BASH BLOCKED: {action.label} — references paths outside the project directory. "
-                f"Only use relative paths or paths inside {project_dir}"
+                f"Only use relative paths or paths inside {project_dir}."
+                + _ANTI_HALLUCINATION_FOOTER
             )
             continue
 
@@ -1025,6 +1036,7 @@ def prompt_and_execute(
             outcomes.append(
                 f"BASH BLOCKED: {action.label} — starts an interactive/watch process that never exits. "
                 "Use CI=true npm test, vitest run, or vite build instead."
+                + _ANTI_HALLUCINATION_FOOTER
             )
             continue
 
