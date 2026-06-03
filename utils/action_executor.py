@@ -45,6 +45,82 @@ from rich.text import Text
 
 console = Console()
 
+
+# ── Smart output truncation ───────────────────────────────────────────
+# Test runners put key info at both the start (collection, import errors)
+# and end (summary, tracebacks). A naive tail-only truncation loses the
+# beginning. This keeps head + tail + extracts summary lines.
+
+_SUMMARY_PATTERNS = [
+    re.compile(r"^=+ .*(passed|failed|error).*=+$", re.MULTILINE | re.IGNORECASE),
+    re.compile(r"^FAILED\s+", re.MULTILINE),
+    re.compile(r"^ERROR\s+", re.MULTILINE),
+    re.compile(r"^\d+ passed", re.MULTILINE),
+    re.compile(r"^Tests:\s+\d+", re.MULTILINE),          # jest
+    re.compile(r"^Test Files\s+\d+", re.MULTILINE),       # vitest
+    re.compile(r"^E\s+\w+Error:", re.MULTILINE),           # pytest tracebacks
+    re.compile(r"^ImportError", re.MULTILINE),
+    re.compile(r"^SyntaxError", re.MULTILINE),
+]
+
+
+def _smart_truncate(output: str, budget: int = 3000) -> str:
+    """Truncate command output keeping the most useful parts.
+
+    Strategy:
+    1. If under budget, return as-is
+    2. Extract summary/error lines (always included)
+    3. Keep first 30 lines (collection, imports, early errors)
+    4. Keep last N lines to fill remaining budget
+    5. Join with a [truncated] marker in the middle
+    """
+    if len(output) <= budget:
+        return output
+
+    lines = output.splitlines()
+
+    # Extract critical summary lines
+    summary_lines = []
+    for line in lines:
+        for pattern in _SUMMARY_PATTERNS:
+            if pattern.search(line):
+                summary_lines.append(line)
+                break
+
+    # Head: first 30 lines (import errors, collection)
+    head_count = min(30, len(lines) // 3)
+    head = lines[:head_count]
+
+    # Tail: last lines to fill budget
+    head_text = "\n".join(head)
+    summary_text = "\n".join(f"  >> {l}" for l in summary_lines) if summary_lines else ""
+    marker = "\n\n[... output truncated ...]\n\n"
+
+    used = len(head_text) + len(summary_text) + len(marker) + 100  # padding
+    tail_budget = max(budget - used, 500)
+
+    # Take last lines that fit in tail_budget
+    tail_lines = []
+    tail_chars = 0
+    for line in reversed(lines[head_count:]):
+        if tail_chars + len(line) + 1 > tail_budget:
+            break
+        tail_lines.insert(0, line)
+        tail_chars += len(line) + 1
+
+    # Assemble
+    parts = [head_text]
+    if tail_lines and tail_lines[0] != lines[head_count]:
+        parts.append(marker)
+    if summary_text:
+        parts.append("KEY LINES:\n" + summary_text)
+    if tail_lines:
+        parts.append("\n".join(tail_lines))
+
+    result = "\n".join(parts)
+    return result[:budget + 500]  # hard cap with some grace
+
+
 # ── Anti-hallucination footer ─────────────────────────────────────────
 # Appended to every failure outcome so agents see it right next to
 # the error. Prevents agents from inventing infrastructure blockers
@@ -1304,15 +1380,14 @@ def prompt_and_execute(
 
             if returncode == 0:
                 console.print("  [green]✓ Done[/green]  (exit 0)\n")
-                # Cap output fed back to agents at 3000 chars to avoid token explosion
-                snippet = output[-3000:] if len(output) > 3000 else output
+                snippet = _smart_truncate(output)
                 _outcome = (
                     f"BASH OK: {action.label}\nOUTPUT:\n{snippet}" if snippet
                     else f"BASH OK: {action.label}"
                 )
             else:
                 console.print(f"  [red]✗ Exited {returncode}[/red]\n")
-                snippet = output[-3000:] if len(output) > 3000 else output
+                snippet = _smart_truncate(output, budget=5000)  # more budget for errors
                 _outcome = (
                     f"BASH FAILED (exit {returncode}): {action.label}\nOUTPUT:\n{snippet}"
                     if snippet
