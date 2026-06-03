@@ -64,6 +64,33 @@ _SUMMARY_PATTERNS = [
 ]
 
 
+_PASS_FAIL_RE = re.compile(
+    r"(\d+)\s+(?:failed|error).+?(\d+)\s+passed", re.IGNORECASE
+)
+_PASS_ONLY_RE = re.compile(r"(\d+)\s+passed", re.IGNORECASE)
+
+
+def _extract_pass_fail_hint(output: str) -> str:
+    """Extract pass/fail counts from test output and return a behavioral hint.
+
+    When most tests pass (>80%), tells the agent to make surgical changes
+    only — not rewrite the file. This prevents the agent from breaking
+    working tests when fixing a small issue.
+    """
+    m = _PASS_FAIL_RE.search(output)
+    if m:
+        failed = int(m.group(1))
+        passed = int(m.group(2))
+        total = passed + failed
+        if total > 0 and passed / total >= 0.8:
+            return (
+                f"\n⚠ {passed}/{total} tests PASSED — the file is mostly correct. "
+                f"Only {failed} test(s) failed. Do NOT rewrite the entire file. "
+                "Use EXEC:edit to change ONLY the failing lines."
+            )
+    return ""
+
+
 def _smart_truncate(output: str, budget: int = 3000) -> str:
     """Truncate command output keeping the most useful parts.
 
@@ -1444,8 +1471,10 @@ def prompt_and_execute(
                 snippet = _smart_truncate(output, budget=5000)  # more budget for errors
                 # Enrich with source context for test failures
                 source_ctx = _enrich_test_failures(output, project_dir)
+                pass_fail_hint = _extract_pass_fail_hint(output)
                 _outcome = (
                     f"BASH FAILED (exit {returncode}): {action.label}\nOUTPUT:\n{snippet}"
+                    + (f"\n{pass_fail_hint}" if pass_fail_hint else "")
                     + (f"\n\nSOURCE CONTEXT (relevant code near failures):\n{source_ctx}" if source_ctx else "")
                     if snippet
                     else f"BASH FAILED (exit {returncode}): {action.label}"

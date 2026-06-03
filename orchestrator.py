@@ -1896,8 +1896,14 @@ class Orchestrator:
             "Your previous attempt just failed and you immediately learned a lesson from it. "
             "That lesson is now in your context. Apply it and fix the problem now.\n\n"
             f"What failed:\n{failure_summary[:1200]}\n\n"
-            "Produce the corrected file(s) or command using EXEC: blocks. "
-            "Do not explain — just fix it."
+            "IMPORTANT RULES FOR THE FIX:\n"
+            "- Use EXEC:edit (surgical edits) for small fixes — do NOT rewrite entire files\n"
+            "- If 90%+ of tests were passing, the file is mostly correct — change ONLY the "
+            "failing lines, not the whole file\n"
+            "- EXEC:edit operations: DELETE <line>, REPLACE <line>: <new>, "
+            "INSERT <line>: <new>, REPLACE_STRING: old -> new\n"
+            "- Only use EXEC:file if the entire file structure is wrong\n"
+            "Do not explain — just fix it with the smallest possible change."
         )
 
         try:
