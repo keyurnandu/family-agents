@@ -121,6 +121,60 @@ def _smart_truncate(output: str, budget: int = 3000) -> str:
     return result[:budget + 500]  # hard cap with some grace
 
 
+# ── Test failure source enrichment ─────────────────────────────────────
+# When pytest fails, extract file:line references from the traceback
+# and read ~10 lines of surrounding source code. This gives agents
+# the cross-file context they need to diagnose assertion mismatches
+# without burning tokens on multiple READ_FILE round trips.
+
+_PYTEST_FILE_LINE_RE = re.compile(
+    r"^(\S+\.py):(\d+):\s+(?:in\s+\w+|AssertionError|assert)",
+    re.MULTILINE,
+)
+
+
+def _enrich_test_failures(output: str, project_dir: Path, max_files: int = 5) -> str:
+    """Extract file:line references from pytest output and read surrounding source.
+
+    Returns a string with source context for each failure location, or empty
+    string if no references found or files unreadable.
+    """
+    matches = _PYTEST_FILE_LINE_RE.findall(output)
+    if not matches:
+        return ""
+
+    seen: set[str] = set()
+    parts: list[str] = []
+
+    for filepath, line_str in matches[:max_files]:
+        key = f"{filepath}:{line_str}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        try:
+            line_num = int(line_str)
+            # Resolve relative to project_dir
+            full_path = (project_dir / filepath).resolve()
+            if not full_path.exists():
+                continue
+
+            lines = full_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            start = max(0, line_num - 6)
+            end = min(len(lines), line_num + 5)
+
+            snippet_lines = []
+            for i in range(start, end):
+                marker = " >> " if i == line_num - 1 else "    "
+                snippet_lines.append(f"{marker}{i + 1:4d} | {lines[i]}")
+
+            parts.append(f"--- {filepath}:{line_num} ---\n" + "\n".join(snippet_lines))
+        except Exception:
+            continue
+
+    return "\n\n".join(parts) if parts else ""
+
+
 # ── Anti-hallucination footer ─────────────────────────────────────────
 # Appended to every failure outcome so agents see it right next to
 # the error. Prevents agents from inventing infrastructure blockers
@@ -1388,8 +1442,11 @@ def prompt_and_execute(
             else:
                 console.print(f"  [red]✗ Exited {returncode}[/red]\n")
                 snippet = _smart_truncate(output, budget=5000)  # more budget for errors
+                # Enrich with source context for test failures
+                source_ctx = _enrich_test_failures(output, project_dir)
                 _outcome = (
                     f"BASH FAILED (exit {returncode}): {action.label}\nOUTPUT:\n{snippet}"
+                    + (f"\n\nSOURCE CONTEXT (relevant code near failures):\n{source_ctx}" if source_ctx else "")
                     if snippet
                     else f"BASH FAILED (exit {returncode}): {action.label}"
                 )
