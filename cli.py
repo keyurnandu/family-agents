@@ -144,6 +144,10 @@ def _open_project(name: str, db, display, model, force_new: bool = False, config
         db.ensure_project(name)
         console.print(f"[dim]Project files → [/dim][cyan]{project_dir}[/cyan]\n")
 
+    # Update analytics with current project name
+    from utils.claude_client import set_analytics_project
+    set_analytics_project(name)
+
     orch = Orchestrator(
         project_name=name,
         base_dir=BASE_DIR,
@@ -183,6 +187,144 @@ def _pick_from_list(raw: str, saved: list) -> str | None:
         )
         return None
     return raw
+
+
+def _show_analytics(conn, sub_command: str = "") -> None:
+    """Display LLM usage analytics in Rich tables."""
+    from utils.analytics import (
+        summary_by_project, summary_by_model, summary_by_agent,
+        summary_by_call_type, session_summary, totals_all_time, daily_usage,
+        get_session_id,
+    )
+    from rich.panel import Panel
+
+    # Parse days arg: /analytics 7 → last 7 days
+    days = 30
+    if sub_command.isdigit():
+        days = int(sub_command)
+
+    console.print()
+
+    # ── Session summary ───────────────────────────────────────────
+    sess = session_summary(conn)
+    if sess and sess.get("calls"):
+        console.print(Panel(
+            f"[bold]This session[/bold]  (id: {get_session_id()})\n"
+            f"  Calls: [cyan]{sess['calls']}[/cyan]  ·  "
+            f"Tokens: [cyan]{sess.get('total_tokens', 0):,}[/cyan]  ·  "
+            f"Cost: [green]${sess.get('total_cost_usd', 0):.4f}[/green]  ·  "
+            f"Avg latency: [yellow]{sess.get('avg_duration_ms', 0):.0f}ms[/yellow]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+    else:
+        console.print("[dim]No analytics data yet — data is collected after each LLM call.[/dim]\n")
+        return
+
+    # ── Totals ────────────────────────────────────────────────────
+    totals = totals_all_time(conn)
+    if totals and totals.get("calls"):
+        console.print(
+            f"\n[bold]All time:[/bold]  "
+            f"{totals['calls']:,} calls  ·  "
+            f"{totals.get('total_tokens', 0):,} tokens  ·  "
+            f"${totals.get('total_cost_usd', 0):.4f}  ·  "
+            f"{totals.get('sessions', 0)} sessions  ·  "
+            f"{totals.get('projects', 0)} projects"
+        )
+
+    console.print(f"\n[dim]Showing last {days} days  (/analytics <N> to change)[/dim]\n")
+
+    # ── By project ────────────────────────────────────────────────
+    by_proj = summary_by_project(conn, days)
+    if by_proj:
+        t = Table(title="Usage by Project", show_header=True, border_style="dim")
+        t.add_column("Project", style="cyan")
+        t.add_column("Calls", justify="right")
+        t.add_column("Input Tokens", justify="right")
+        t.add_column("Output Tokens", justify="right")
+        t.add_column("Total Tokens", justify="right", style="bold")
+        t.add_column("Est. Cost", justify="right", style="green")
+        t.add_column("Avg Latency", justify="right", style="yellow")
+        for r in by_proj:
+            t.add_row(
+                r["project"], str(r["calls"]),
+                f"{r.get('input_tokens', 0):,}", f"{r.get('output_tokens', 0):,}",
+                f"{r.get('total_tokens', 0):,}", f"${r['total_cost_usd']:.4f}",
+                f"{r.get('avg_duration_ms', 0):.0f}ms",
+            )
+        console.print(t)
+        console.print()
+
+    # ── By model ──────────────────────────────────────────────────
+    by_model = summary_by_model(conn, days)
+    if by_model:
+        t = Table(title="Usage by Model", show_header=True, border_style="dim")
+        t.add_column("Model", style="cyan")
+        t.add_column("Calls", justify="right")
+        t.add_column("Tokens", justify="right")
+        t.add_column("Est. Cost", justify="right", style="green")
+        t.add_column("Avg Latency", justify="right", style="yellow")
+        for r in by_model:
+            t.add_row(
+                r["model"], str(r["calls"]),
+                f"{r.get('total_tokens', 0):,}", f"${r['total_cost_usd']:.4f}",
+                f"{r.get('avg_duration_ms', 0):.0f}ms",
+            )
+        console.print(t)
+        console.print()
+
+    # ── By agent ──────────────────────────────────────────────────
+    by_agent = summary_by_agent(conn, days)
+    if by_agent:
+        t = Table(title="Usage by Agent", show_header=True, border_style="dim")
+        t.add_column("Agent", style="cyan")
+        t.add_column("Calls", justify="right")
+        t.add_column("Tokens", justify="right")
+        t.add_column("Est. Cost", justify="right", style="green")
+        t.add_column("Failures", justify="right", style="red")
+        for r in by_agent:
+            t.add_row(
+                r["agent"], str(r["calls"]),
+                f"{r.get('total_tokens', 0):,}", f"${r['total_cost_usd']:.4f}",
+                str(r.get("failures", 0)),
+            )
+        console.print(t)
+        console.print()
+
+    # ── By call type ──────────────────────────────────────────────
+    by_type = summary_by_call_type(conn, days)
+    if by_type:
+        t = Table(title="Usage by Call Type", show_header=True, border_style="dim")
+        t.add_column("Type", style="cyan")
+        t.add_column("Calls", justify="right")
+        t.add_column("Tokens", justify="right")
+        t.add_column("Est. Cost", justify="right", style="green")
+        t.add_column("Avg Latency", justify="right", style="yellow")
+        for r in by_type:
+            t.add_row(
+                r["call_type"], str(r["calls"]),
+                f"{r.get('total_tokens', 0):,}", f"${r['total_cost_usd']:.4f}",
+                f"{r.get('avg_duration_ms', 0):.0f}ms",
+            )
+        console.print(t)
+        console.print()
+
+    # ── Daily usage ───────────────────────────────────────────────
+    daily = daily_usage(conn, min(days, 14))
+    if daily:
+        t = Table(title="Daily Usage (last 14 days)", show_header=True, border_style="dim")
+        t.add_column("Date", style="cyan")
+        t.add_column("Calls", justify="right")
+        t.add_column("Tokens", justify="right")
+        t.add_column("Est. Cost", justify="right", style="green")
+        for r in daily:
+            t.add_row(
+                r["date"], str(r["calls"]),
+                f"{r.get('total_tokens', 0):,}", f"${r['total_cost_usd']:.4f}",
+            )
+        console.print(t)
+        console.print()
 
 
 def _handle_pre_project_command(raw: str, saved: list, config: dict, display) -> None:
@@ -253,6 +395,10 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
     db = DBManager(BASE_DIR / "db" / "conversations.db")
     display = Display()
+
+    # Wire up LLM analytics — every call_claude() logs to the DB
+    from utils.claude_client import set_analytics
+    set_analytics(conn=db.conn)
 
     with open(BASE_DIR / "config" / "settings.yaml", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -510,6 +656,10 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd.startswith("/failures"):
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
                 orchestrator.show_failures(category=arg if arg else None)
+
+            elif cmd.startswith("/analytics"):
+                arg = parts[1].strip().lower() if len(parts) > 1 else ""
+                _show_analytics(db.conn, arg)
 
             elif cmd == "/state":
                 state = orchestrator._load_project_state()

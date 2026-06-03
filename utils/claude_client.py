@@ -8,10 +8,38 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Optional
 
 # In-process session stats (reset on process start, not persisted)
 _session_stats: dict = {"calls": 0, "input_chars": 0, "output_chars": 0}
+
+# ── Analytics hook ────────────────────────────────────────────────────
+# Set by the orchestrator at startup so every LLM call is logged
+# without claude_client needing to import db_manager directly.
+_analytics_conn = None          # sqlite3.Connection | None
+_analytics_project: str = ""    # current project name
+_analytics_context: dict = {}   # {"call_type": ..., "agent_role": ...}
+
+
+def set_analytics(conn, project_name: str = "") -> None:
+    """Wire up the analytics DB connection. Called once at startup."""
+    global _analytics_conn, _analytics_project
+    _analytics_conn = conn
+    _analytics_project = project_name
+
+
+def set_analytics_project(project_name: str) -> None:
+    """Update the current project name (called on /switch)."""
+    global _analytics_project
+    _analytics_project = project_name
+
+
+def set_analytics_context(call_type: str = "", agent_role: str = "") -> None:
+    """Set context for the next LLM call (call_type, agent_role).
+    Reset after each call so stale context doesn't leak."""
+    _analytics_context["call_type"] = call_type
+    _analytics_context["agent_role"] = agent_role
 
 def get_session_stats() -> dict:
     total_chars = _session_stats["input_chars"] + _session_stats["output_chars"]
@@ -61,12 +89,16 @@ def call_claude(
     if model:
         cmd += ["--model", model]
 
-    _session_stats["input_chars"] += len(prompt) + len(system_prompt or "")
+    input_chars = len(prompt) + len(system_prompt or "")
+    _session_stats["input_chars"] += input_chars
 
     # Write system prompt to a temp file — avoids putting thousands of
     # chars on the command line which triggers WinError 206 on Windows
     # when the OneDrive path + system prompt exceed 32k chars.
     sp_file = None
+    t_start = time.monotonic()
+    success = False
+    output = ""
     try:
         if system_prompt:
             fd, sp_file = tempfile.mkstemp(suffix=".txt", prefix="claude_sp_")
@@ -90,14 +122,50 @@ def call_claude(
             except OSError:
                 pass
 
+    duration_ms = int((time.monotonic() - t_start) * 1000)
+
     if result.returncode != 0:
+        # Log failed call to analytics before raising
+        _log_to_analytics(model or "sonnet", input_chars, 0, duration_ms, success=False)
         stderr = result.stderr.strip()
         raise RuntimeError(f"claude CLI exit {result.returncode}: {stderr}")
 
     output = result.stdout.strip()
     _session_stats["output_chars"] += len(output)
     _session_stats["calls"] += 1
+    success = True
+
+    # Log to analytics
+    _log_to_analytics(model or "sonnet", input_chars, len(output), duration_ms, success=True)
+
     return output
+
+
+def _log_to_analytics(
+    model: str, input_chars: int, output_chars: int,
+    duration_ms: int, success: bool,
+) -> None:
+    """Log a call to the analytics DB if connected. Never raises."""
+    if not _analytics_conn:
+        return
+    try:
+        from utils.analytics import log_call
+        log_call(
+            conn=_analytics_conn,
+            project_name=_analytics_project or None,
+            call_type=_analytics_context.get("call_type", "unknown"),
+            agent_role=_analytics_context.get("agent_role"),
+            model=model,
+            input_chars=input_chars,
+            output_chars=output_chars,
+            duration_ms=duration_ms,
+            success=success,
+        )
+    except Exception:
+        pass  # analytics must never break the main flow
+    finally:
+        # Reset context so stale values don't leak to the next call
+        _analytics_context.clear()
 
 
 def call_claude_json(

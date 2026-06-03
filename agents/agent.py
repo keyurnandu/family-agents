@@ -431,6 +431,8 @@ class Agent:
         prompt = "\n\n".join(prompt_parts)
 
         try:
+            from utils.claude_client import set_analytics_context
+            set_analytics_context(call_type="agent", agent_role=self.role)
             response = call_claude(prompt=prompt, system_prompt=system_prompt, model=self.model)
         except Exception as e:
             return f"(error calling {self.name}: {e})"

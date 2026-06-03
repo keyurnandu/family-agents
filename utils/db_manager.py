@@ -11,6 +11,10 @@ class DBManager:
         self._init_db()
 
     def _init_db(self):
+        # Analytics table — tracks every LLM call
+        from utils.analytics import init_analytics_table
+        init_analytics_table(self.conn)
+
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

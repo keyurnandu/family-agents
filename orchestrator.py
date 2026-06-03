@@ -11,7 +11,7 @@ from rich.console import Console
 
 from agents.agent import Agent
 from utils.action_executor import parse_actions, prompt_and_execute
-from utils.claude_client import call_claude, call_claude_json
+from utils.claude_client import call_claude, call_claude_json, set_analytics_context
 from utils.db_manager import DBManager
 from utils.display import Display, _ts
 from utils.memory_manager import MemoryManager
@@ -971,6 +971,7 @@ class Orchestrator:
             "Maximum 2 sentences. No preamble, no explanation."
         )
         try:
+            set_analytics_context(call_type="lesson", agent_role=role)
             lesson = call_claude(
                 prompt=prompt,
                 system_prompt="You extract precise, actionable lessons from failures. Be specific, not generic.",
@@ -1779,6 +1780,7 @@ class Orchestrator:
         state_context = self._turn_state[:600] if self._turn_state else ""
 
         try:
+            set_analytics_context(call_type="auto-pilot", agent_role="orchestrator")
             result = call_claude_json(
                 prompt=(
                     f"Original customer request: {user_input}\n\n"
@@ -2039,6 +2041,7 @@ class Orchestrator:
         system_prompt = self._routing_system_prompt()
 
         try:
+            set_analytics_context(call_type="routing", agent_role="orchestrator")
             result = call_claude_json(
                 prompt=prompt,
                 schema=ROUTING_SCHEMA,
@@ -2644,6 +2647,7 @@ class Orchestrator:
             with console.status("[bright_cyan]🎯 Aria is synthesizing…[/bright_cyan]", spinner="dots"):
                 synth_prompt = self._synthesis_prompt(user_input, agent_responses)
                 try:
+                    set_analytics_context(call_type="synthesis", agent_role="orchestrator")
                     final_response = call_claude(
                         prompt=synth_prompt,
                         system_prompt=self._synthesis_system_prompt(),
