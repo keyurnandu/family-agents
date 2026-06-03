@@ -40,7 +40,9 @@ class TestAgentPromptTokenTrim:
         assert _EXEC_INSTRUCTIONS in prompt
         assert "## Delivering Files and Commands" not in prompt
         assert prompt.count("## Executing Actions") == 1
-        assert "Always include the COMPLETE file content" in _EXEC_INSTRUCTIONS
+        assert "EXEC:file" in _EXEC_INSTRUCTIONS
+        assert "EXEC:edit" in _EXEC_INSTRUCTIONS
+        assert "EXEC:bash" in _EXEC_INSTRUCTIONS
 
     def test_prompt_cache_key_changes_when_key_file_content_changes(self, base_dir, config):
         """Prompt cache invalidation should reflect key file content, not only filenames."""

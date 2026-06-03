@@ -1539,10 +1539,21 @@ class Orchestrator:
             auto_previous_messages.append(next_msg)
             iteration += 1
 
-            # Cost warning: show token burn so user can Ctrl+C early
+            # Cost warning + token budget guard
             current_tokens = get_session_stats().get("estimated_tokens", 0)
             tokens_burned = current_tokens - pre_auto_tokens
             cost_hint = f"  [dim]~{tokens_burned:,} tokens burned in auto-pilot[/dim]" if tokens_burned > 0 else ""
+
+            # Token budget: stop if auto-pilot has burned too many tokens
+            # Default 200k — prevents runaway loops from consuming entire context
+            token_budget = self.config.get("auto_pilot_token_budget", 200_000)
+            if tokens_burned > token_budget:
+                console.print(
+                    f"\n[yellow]⚠ Auto-pilot token budget exceeded "
+                    f"({tokens_burned:,} > {token_budget:,})[/yellow]"
+                )
+                _stop_reason = "token_budget"
+                break
 
             console.print(
                 f"\n[bold bright_cyan]🤖 Auto-pilot[/bold bright_cyan]  "

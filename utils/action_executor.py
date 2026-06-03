@@ -682,9 +682,9 @@ def normalize_bash_command(
 
 @dataclass
 class Action:
-    kind: Literal["file", "bash"]
+    kind: Literal["file", "bash", "edit"]
     label: str       # file path or command summary
-    content: str     # file content or bash script
+    content: str     # file content, bash script, or edit instructions
     agent_name: str
 
 
@@ -708,11 +708,28 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
     """Extract EXEC: tagged blocks from an agent response."""
     actions: list[Action] = []
 
-    chunks = re.split(r"(?=EXEC:(?:file:|bash))", response_text, flags=re.IGNORECASE)
+    chunks = re.split(r"(?=EXEC:(?:file:|edit:|bash))", response_text, flags=re.IGNORECASE)
 
     for chunk in chunks:
         chunk = chunk.strip()
         if not chunk.upper().startswith("EXEC:"):
+            continue
+
+        # ── EXEC:edit:path — surgical line edits (low token cost) ────
+        edit_match = re.match(
+            r"EXEC:edit:([^\n]+)\n"
+            r"```[^\n]*\n"
+            r"(.*)"
+            r"\n```",
+            chunk,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if edit_match:
+            path = edit_match.group(1).strip().strip("*`'\"")
+            content = edit_match.group(2).strip()
+            content = _strip_nested_fences(content)
+            if content:
+                actions.append(Action(kind="edit", label=path, content=content, agent_name=agent_name))
             continue
 
         file_match = re.match(
@@ -742,16 +759,14 @@ def parse_actions(response_text: str, agent_name: str) -> list[Action]:
         if bash_match:
             content = bash_match.group(1).strip()
             content = _strip_nested_fences(content)
-            # Strip trailing prose that leaked in via greedy regex —
-            # stop at the first line that looks like prose (starts with
-            # a capital letter followed by lowercase, no shell metachar)
+            # Strip trailing prose that leaked in via greedy regex
             clean_lines = []
             for line in content.splitlines():
                 stripped = line.strip()
                 if stripped and re.match(r"^[A-Z][a-z]", stripped) and not any(
                     c in stripped for c in ("&&", "||", "|", ">", "<", "$", "=", "/", "\\", "-")
                 ):
-                    break  # prose line — stop here
+                    break
                 clean_lines.append(line)
             content = "\n".join(clean_lines).strip()
             if content:
@@ -838,6 +853,135 @@ def run_health_check(cmd: str, cwd: Path) -> tuple[bool, str]:
         return False, f"Health check error: {e}"
 
 
+# ── Surgical edit execution ────────────────────────────────────────────
+# EXEC:edit supports three operations per line:
+#   DELETE <line_number>
+#   REPLACE <line_number>: <new_content>
+#   INSERT <line_number>: <new_content>       (inserts BEFORE the line)
+#   REPLACE_STRING: <old_string> -> <new_string>  (search & replace)
+
+def _apply_edit(action: Action, project_dir: Path, auto_mode: bool) -> str:
+    """Apply surgical line edits to a file. Returns an outcome string."""
+    dest = (project_dir / action.label).resolve()
+    project_root = str(project_dir.resolve()).rstrip("\\/").lower()
+
+    # Sandbox check
+    if not str(dest).lower().startswith(project_root):
+        console.print(
+            f"  [red]✗ BLOCKED[/red]  [cyan]{action.label}[/cyan]  "
+            "[dim](path escapes project directory)[/dim]"
+        )
+        return f"EDIT BLOCKED: {action.label} — escapes project directory." + _ANTI_HALLUCINATION_FOOTER
+
+    if not dest.exists():
+        console.print(
+            f"  [red]✗ EDIT FAILED[/red]  [cyan]{action.label}[/cyan]  "
+            "[dim](file does not exist)[/dim]"
+        )
+        return f"EDIT FAILED: {action.label} — file does not exist. Use EXEC:file to create new files."
+
+    try:
+        original = dest.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"EDIT FAILED: {action.label} — could not read file: {e}"
+
+    lines = original.splitlines()
+    edits_applied = 0
+    errors = []
+
+    for instruction in action.content.splitlines():
+        instruction = instruction.strip()
+        if not instruction:
+            continue
+
+        # REPLACE_STRING: old -> new
+        if instruction.upper().startswith("REPLACE_STRING:"):
+            parts = instruction[len("REPLACE_STRING:"):].strip()
+            arrow_idx = parts.find("->")
+            if arrow_idx == -1:
+                errors.append(f"Bad REPLACE_STRING syntax: {instruction[:60]}")
+                continue
+            old_str = parts[:arrow_idx].strip()
+            new_str = parts[arrow_idx + 2:].strip()
+            new_content = "\n".join(lines)
+            if old_str in new_content:
+                new_content = new_content.replace(old_str, new_str, 1)
+                lines = new_content.splitlines()
+                edits_applied += 1
+            else:
+                errors.append(f"String not found: {old_str[:40]}")
+            continue
+
+        # DELETE <line_number>
+        if instruction.upper().startswith("DELETE"):
+            try:
+                line_num = int(instruction.split()[1])
+                if 1 <= line_num <= len(lines):
+                    lines.pop(line_num - 1)
+                    edits_applied += 1
+                else:
+                    errors.append(f"Line {line_num} out of range (file has {len(lines)} lines)")
+            except (IndexError, ValueError):
+                errors.append(f"Bad DELETE syntax: {instruction[:60]}")
+            continue
+
+        # REPLACE <line_number>: <content>
+        if instruction.upper().startswith("REPLACE"):
+            try:
+                rest = instruction[len("REPLACE"):].strip()
+                colon_idx = rest.index(":")
+                line_num = int(rest[:colon_idx].strip())
+                new_line = rest[colon_idx + 1:].strip()
+                if 1 <= line_num <= len(lines):
+                    lines[line_num - 1] = new_line
+                    edits_applied += 1
+                else:
+                    errors.append(f"Line {line_num} out of range")
+            except (ValueError, IndexError):
+                errors.append(f"Bad REPLACE syntax: {instruction[:60]}")
+            continue
+
+        # INSERT <line_number>: <content>
+        if instruction.upper().startswith("INSERT"):
+            try:
+                rest = instruction[len("INSERT"):].strip()
+                colon_idx = rest.index(":")
+                line_num = int(rest[:colon_idx].strip())
+                new_line = rest[colon_idx + 1:].strip()
+                if 1 <= line_num <= len(lines) + 1:
+                    lines.insert(line_num - 1, new_line)
+                    edits_applied += 1
+                else:
+                    errors.append(f"Line {line_num} out of range")
+            except (ValueError, IndexError):
+                errors.append(f"Bad INSERT syntax: {instruction[:60]}")
+            continue
+
+    if edits_applied == 0:
+        msg = f"EDIT FAILED: {action.label} — no edits applied"
+        if errors:
+            msg += f". Errors: {'; '.join(errors)}"
+        console.print(f"  [red]✗ EDIT FAILED[/red]  [cyan]{action.label}[/cyan]  [dim]({'; '.join(errors)})[/dim]")
+        return msg
+
+    # Show summary and apply
+    console.print(
+        f"  [green]✏ EDIT[/green]  [cyan]{action.label}[/cyan]  "
+        f"[dim]{edits_applied} edit(s) applied[/dim]"
+        + (f"  [yellow]{len(errors)} error(s)[/yellow]" if errors else "")
+    )
+
+    if auto_mode:
+        console.print("[dim green]  ⚡ Auto-approved (auto mode)[/dim green]")
+    else:
+        approved = console.input("  Apply edit? [y/N] ").strip().lower() in ("y", "yes")
+        if not approved:
+            return f"EDIT SKIPPED: {action.label}"
+
+    dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return f"EDIT APPLIED: {action.label} — {edits_applied} edit(s)"
+
+
 def prompt_and_execute(
     actions: list[Action],
     project_dir: Path,
@@ -860,8 +1004,16 @@ def prompt_and_execute(
         return []
 
     outcomes: list[str] = []
+    edit_actions = [a for a in actions if a.kind == "edit"]
     file_actions = [a for a in actions if a.kind == "file"]
     bash_actions  = [a for a in actions if a.kind == "bash"]
+
+    # ── Surgical edits — apply line-level changes (low token cost) ──
+    if edit_actions:
+        for a in edit_actions:
+            result = _apply_edit(a, project_dir, auto_mode)
+            outcomes.append(result)
+        console.print()
 
     # ── File changes — one collective prompt ─────────────────────────
     if file_actions:
