@@ -28,9 +28,13 @@ Researcher, QA, and DevOps join automatically when the project needs them, or yo
 ## Prerequisites
 
 - Python 3.10+
-- [Claude Code](https://claude.ai/code) installed and logged in
+- **One of** the following LLM backends:
+  - [Claude Code](https://claude.ai/code) installed and logged in (default — no API key needed)
+  - Anthropic API key (`pip install anthropic` + `ANTHROPIC_API_KEY` in `.env`)
+  - OpenAI-compatible API key (`pip install openai` + `OPENAI_API_KEY` in `.env`) — works with OpenAI, Groq, Together, Azure, etc.
+  - [Ollama](https://ollama.ai) running locally (no API key needed)
 
-That's it — no API keys, no environment variables.
+The default provider (`claude_cli`) requires only Claude Code installed — no API keys, no environment variables. Switch providers anytime with `/provider`.
 
 ---
 
@@ -48,7 +52,7 @@ pip install -r requirements.txt
 pytest
 ```
 
-322 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, blocking command detection, timeout diagnosis, always-on auto-pilot, loop safety guards, checkpoint auto-resume) without requiring an LLM connection.
+326 tests should pass. Tests cover all internal optimizations (caching, dedup, threading, regex compilation, path normalization, token-budget guards, auto-approve, destructive command detection, blocking command detection, timeout diagnosis, always-on auto-pilot, loop safety guards, checkpoint auto-resume, provider abstraction) without requiring an LLM connection.
 
 ---
 
@@ -180,7 +184,11 @@ Paste mode opened — paste your content below, then type /end to send.
 | `/redo` | Re-send or edit your last message — pre-filled prompt, press Enter to re-send or type a correction |
 | `/paste` | Open paste mode — type or paste multi-line content, then `/end` to send as one message |
 | `/end` | Close paste mode and send everything as a single message |
-| `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` |
+| `/model [alias]` | Show current model or switch — `haiku` · `sonnet` · `opus` (or any model your provider supports) |
+| `/provider [name]` | Show, switch, or save LLM provider — `claude_cli` · `anthropic_api` · `openai_api` · `ollama` |
+| `/provider save` | Persist current provider as default (auto-loads next session) |
+| `/provider models` | List available models for the current provider |
+| `/analytics [days]` | LLM usage analytics — cost, tokens, calls by project/agent/model (default: 30 days) |
 | `/load <path>` | Load an existing codebase for review or editing |
 | `/unload` | Unload the current codebase |
 | `/help` | Show full help |
@@ -840,14 +848,17 @@ family-agents/
 │       └── ...
 ├── utils/
 │   ├── action_executor.py    # Permission-prompted file/command execution
-│   ├── claude_client.py      # Subprocess wrapper for `claude --print`
+│   ├── claude_client.py      # Model-agnostic LLM client (routes to active provider)
+│   ├── llm_providers.py      # Provider abstraction (ClaudeCLI, AnthropicAPI, OpenAI, Ollama)
+│   ├── analytics.py          # LLM usage tracking (per-call cost, tokens, latency)
 │   ├── db_manager.py         # SQLite conversation history (persistent connection)
 │   ├── memory_manager.py     # Project memory read/write (hash-based dedup)
 │   └── display.py            # Rich terminal UI
-├── tests/                    # 322 tests — all TDD, run with `pytest`
+├── .env.example              # Template for API keys (copy to .env)
+├── tests/                    # 326 tests — all TDD, run with `pytest`
 │   ├── conftest.py           # Shared fixtures (base_dir, config, db_path)
 │   ├── test_smoke.py         # Smoke test for fixture integrity
-│   ├── test_claude_client.py # CLI check caching
+│   ├── test_claude_client.py # CLI check caching + provider abstraction
 │   ├── test_regexes.py       # Module-level regex validation
 │   ├── test_imports.py       # No inline imports, synthesis trimming
 │   ├── test_db_manager.py    # Persistent connection, CRUD operations
@@ -866,9 +877,9 @@ family-agents/
 │   ├── test_db_manager.py    # delete_last_n_messages, persistent connection, CRUD
 │   └── test_blocking_commands.py  # is_blocking_bash() and _diagnose_timeout() — 78 tests
 ├── config/
-│   └── settings.yaml         # Model, team roster, agent personas
+│   └── settings.yaml         # Provider, model, team roster, agent personas
 ├── pytest.ini                # Test configuration
-└── requirements.txt          # click, rich, pyyaml, pytest — no anthropic SDK
+└── requirements.txt          # click, rich, pyyaml, pytest (openai/anthropic optional)
 ```
 
 > `db/`, `memory/dynamic/`, and `projects/*/` are excluded from git — they contain your local project data. The `projects/` folder itself is tracked so it exists on a fresh clone.
@@ -1051,7 +1062,8 @@ Updated automatically after every exchange. Also visible in `/status`.
 **`config/settings.yaml`**
 
 ```yaml
-model: sonnet            # alias: haiku / sonnet / opus
+provider: claude_cli     # LLM backend: claude_cli / anthropic_api / openai_api / ollama
+model: sonnet            # model name (provider-specific): haiku / sonnet / gpt-4o / llama3.1
 routing_model: haiku     # model used for Aria's routing decision — haiku is faster and sufficient
 safe_context_tokens: 200000  # token threshold for the context bar — set to your model's context window
 max_history_messages: 10 # conversation turns loaded when resuming a project
@@ -1073,23 +1085,103 @@ agent_personas:
   # ... one entry per role
 ```
 
-**Model aliases** (passed to `claude --model`):
-| Alias | Model | Best for |
+**Model aliases** (depend on your active provider):
+
+| Provider | Example models | Switch with |
 |---|---|---|
-| `haiku` | Claude Haiku | Fast responses, lower cost |
-| `sonnet` | Claude Sonnet | Balanced — default |
-| `opus` | Claude Opus | Complex architecture, deep analysis |
+| `claude_cli` | haiku · sonnet · opus | `/model sonnet` |
+| `anthropic_api` | haiku · sonnet · opus | `/model sonnet` |
+| `openai_api` | gpt-4o · gpt-4o-mini · gpt-4-turbo | `/model gpt-4o` |
+| `ollama` | llama3.1 · mistral · codellama | `/model llama3.1` |
+
+For OpenAI-compatible endpoints (Groq, Together, etc.), set `OPENAI_BASE_URL` in `.env`.
 
 ---
 
-## How It Uses Claude Code
+## LLM Providers
 
-Every agent call is a `claude --print` subprocess — the same Claude you're already running. No SDK, no API key, no extra cost beyond your existing Claude subscription.
+The system is model-agnostic — switch between any LLM backend without changing code or agent prompts.
+
+| Provider | Backend | API Key | Install |
+|---|---|---|---|
+| `claude_cli` (default) | `claude --print` subprocess | None (uses Claude Code subscription) | Claude Code installed |
+| `anthropic_api` | Anthropic Python SDK | `ANTHROPIC_API_KEY` in `.env` | `pip install anthropic` |
+| `openai_api` | OpenAI-compatible API | `OPENAI_API_KEY` in `.env` | `pip install openai` |
+| `ollama` | Local models via REST | None | [Ollama](https://ollama.ai) running |
+
+### Quick start — switch to a different provider
+
+```bash
+# 1. Copy the env template and add your key
+cp .env.example .env
+# Edit .env: uncomment and fill in your API key
+
+# 2. In the CLI:
+/provider openai_api     # switch to OpenAI
+/model gpt-4o            # pick a model
+/provider save           # persist as default for next session
+```
+
+### Provider commands
+
+```
+/provider              Show current provider + all available
+/provider <name>       Switch to a provider (claude_cli, anthropic_api, openai_api, ollama)
+/provider models       List available models for the current provider
+/provider save         Persist current provider to settings.yaml
+```
+
+The provider auto-validates at startup. If not configured (missing API key, Ollama not running), it falls back to `claude_cli` with a warning.
+
+### Using Groq, Together, or other OpenAI-compatible endpoints
+
+Set `OPENAI_BASE_URL` in your `.env` file:
+
+```bash
+# Groq (fast inference)
+OPENAI_API_KEY=gsk_...
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+
+# Together AI
+OPENAI_API_KEY=...
+OPENAI_BASE_URL=https://api.together.xyz/v1
+```
+
+Then: `/provider openai_api` → `/model llama-3.1-70b-versatile` → `/provider save`
+
+---
+
+## LLM Usage Analytics
+
+Every LLM call is tracked with cost, tokens, latency, model, agent, and call type. Data persists across sessions in `db/conversations.db`.
+
+```
+/analytics             Show usage for the last 30 days
+/analytics 7           Show usage for the last 7 days
+/analytics 90          Last quarter
+```
+
+Displays five breakdowns:
+- **This session** — calls, tokens, cost, avg latency
+- **By project** — which projects consume the most tokens
+- **By model** — haiku vs sonnet vs opus cost comparison
+- **By agent** — which agents use the most tokens + failure counts
+- **By call type** — routing vs agent vs synthesis vs auto-pilot
+
+Cost estimates use Anthropic's published rates (haiku: $0.25/$1.25 per M tokens; sonnet: $3/$15; opus: $15/$75). For non-Anthropic providers, the same estimation formula applies.
+
+---
+
+## How It Works Under the Hood
+
+Every agent call goes through `call_claude()` → the active LLM provider. The provider abstraction means agents and the orchestrator never know which backend is running.
 
 ```
 python cli.py
   └─▶ orchestrator.py: call_claude_json(routing_prompt)
-        └─▶ claude --print --model sonnet --system-prompt "..." "..."
+        └─▶ LLMProvider.complete_json(...)
+              └─▶ claude --print / anthropic SDK / openai SDK / ollama REST
   └─▶ agents/agent.py: call_claude(task_prompt)
-        └─▶ claude --print --model sonnet --system-prompt "..." "..."
+        └─▶ LLMProvider.complete(...)
+              └─▶ claude --print / anthropic SDK / openai SDK / ollama REST
 ```
