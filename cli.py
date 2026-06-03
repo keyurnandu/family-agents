@@ -4,6 +4,7 @@ Tech Organization Agent System
 Run: python cli.py [--project NAME]
 """
 
+import os
 import re
 import shutil
 import sys
@@ -187,6 +188,108 @@ def _pick_from_list(raw: str, saved: list) -> str | None:
         )
         return None
     return raw
+
+
+def _init_provider(config: dict) -> None:
+    """Initialize the LLM provider from settings.yaml."""
+    provider_name = config.get("provider", "claude_cli")
+    try:
+        from utils.claude_client import set_provider_by_name
+        provider = set_provider_by_name(provider_name)
+        ok, msg = provider.validate()
+        if ok:
+            console.print(f"[dim]LLM provider: [cyan]{provider_name}[/cyan] — {msg}[/dim]")
+        else:
+            console.print(
+                f"[yellow]⚠ Provider {provider_name} not ready:[/yellow] {msg}\n"
+                "[dim]Falling back to claude_cli. Use /provider to configure.[/dim]"
+            )
+            set_provider_by_name("claude_cli")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Provider init failed: {e}. Using claude_cli.[/yellow]")
+        from utils.claude_client import set_provider_by_name
+        set_provider_by_name("claude_cli")
+
+
+def _handle_provider_command(args: str, config: dict) -> None:
+    """Handle /provider command — list, switch, or show status."""
+    from utils.llm_providers import get_provider_info, PROVIDERS
+    from utils.claude_client import get_provider, set_provider_by_name
+    from rich.panel import Panel
+
+    parts = args.strip().split(None, 1)
+    sub = parts[0].lower() if parts else ""
+
+    if not sub or sub == "status":
+        # Show current provider and all available
+        current = get_provider()
+        ok, msg = current.validate()
+        console.print(Panel(
+            f"[bold]Active:[/bold] [cyan]{current.name}[/cyan]  —  {msg}\n"
+            f"[bold]Models:[/bold] {', '.join(current.list_models()[:10])}",
+            title="[bold]Current LLM Provider[/bold]",
+            border_style="cyan",
+            padding=(0, 2),
+        ))
+        console.print()
+        info = get_provider_info()
+        t = Table(title="Available Providers", show_header=True, border_style="dim")
+        t.add_column("Provider", style="cyan")
+        t.add_column("Status")
+        t.add_column("Detail", style="dim")
+        for p in info:
+            active = " ◄" if p["name"] == current.name else ""
+            t.add_row(p["name"] + active, p["status"], p["detail"])
+        console.print(t)
+        console.print(
+            "\n[dim]Switch: /provider <name>  ·  "
+            "List models: /provider models  ·  "
+            "Save as default: /provider save[/dim]\n"
+        )
+
+    elif sub == "models":
+        current = get_provider()
+        models = current.list_models()
+        console.print(f"\n[bold]Models for {current.name}:[/bold]")
+        for m in models:
+            console.print(f"  [cyan]•[/cyan] {m}")
+        console.print()
+
+    elif sub == "save":
+        # Persist current provider to settings.yaml
+        current = get_provider()
+        config["provider"] = current.name
+        settings_path = Path(__file__).parent / "config" / "settings.yaml"
+        with open(settings_path, "w", encoding="utf-8") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        console.print(
+            f"[green]✓ Saved [bold]{current.name}[/bold] as default provider[/green]  "
+            "[dim](persisted to settings.yaml)[/dim]\n"
+        )
+
+    elif sub in PROVIDERS:
+        # Switch to a specific provider
+        try:
+            provider = set_provider_by_name(sub)
+            ok, msg = provider.validate()
+            if ok:
+                console.print(
+                    f"[green]✓ Switched to [bold]{sub}[/bold][/green]  —  {msg}\n"
+                    "[dim]Use /provider save to make this the default.[/dim]\n"
+                )
+            else:
+                console.print(
+                    f"[yellow]⚠ {sub} not fully configured:[/yellow] {msg}\n"
+                    "[dim]Set the required env vars and try again.[/dim]\n"
+                )
+        except Exception as e:
+            console.print(f"[red]Failed to switch: {e}[/red]\n")
+
+    else:
+        console.print(
+            f"[yellow]Unknown provider:[/yellow] {sub}\n"
+            f"[dim]Available: {', '.join(PROVIDERS.keys())}[/dim]\n"
+        )
 
 
 def _show_analytics(conn, sub_command: str = "") -> None:
@@ -390,6 +493,15 @@ def main(project: str | None, list_projects: bool, model: str | None):
     """
     _check_cli()
 
+    # Load .env file for API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+    env_file = BASE_DIR / ".env"
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
     from utils.db_manager import DBManager
     from utils.display import Display
 
@@ -402,6 +514,9 @@ def main(project: str | None, list_projects: bool, model: str | None):
 
     with open(BASE_DIR / "config" / "settings.yaml", encoding="utf-8") as f:
         config = yaml.safe_load(f)
+
+    # ── Initialize LLM provider from config ──────────────────────────
+    _init_provider(config)
 
     # ── python cli.py --list ──────────────────────────────────────────
     if list_projects:
@@ -660,6 +775,10 @@ def main(project: str | None, list_projects: bool, model: str | None):
             elif cmd.startswith("/analytics"):
                 arg = parts[1].strip().lower() if len(parts) > 1 else ""
                 _show_analytics(db.conn, arg)
+
+            elif cmd.startswith("/provider"):
+                arg = raw[len("/provider"):].strip()
+                _handle_provider_command(arg, config)
 
             elif cmd == "/state":
                 state = orchestrator._load_project_state()

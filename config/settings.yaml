@@ -1,3 +1,17 @@
+# ── LLM Provider ──────────────────────────────────────────────────────
+# provider: which backend to use for all LLM calls
+#   claude_cli     — claude --print subprocess (default, no API key)
+#   anthropic_api  — Anthropic Python SDK (needs ANTHROPIC_API_KEY in .env)
+#   openai_api     — OpenAI-compatible (needs OPENAI_API_KEY; set OPENAI_BASE_URL for Groq/Together/etc.)
+#   ollama         — Local models via Ollama (needs ollama serve running)
+# Switch at runtime with: /provider <name>
+provider: claude_cli
+
+# provider_model: the specific model name to use with the active provider
+# For claude_cli: haiku / sonnet / opus
+# For openai_api: gpt-4o / gpt-4o-mini / etc.
+# For ollama: llama3.1 / mistral / codellama / etc.
+# For anthropic_api: haiku / sonnet / opus (mapped to full model IDs)
 model: sonnet            # alias: haiku / sonnet / opus
 routing_model: haiku     # model used for Aria's routing decision — haiku is faster and sufficient
 safe_context_tokens: 200000  # token threshold for the context bar (sonnet/opus = 200k, haiku = 200k)
